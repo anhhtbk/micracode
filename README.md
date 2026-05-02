@@ -5,9 +5,7 @@
     Open-Source AI Web App Builder
 </h1>
 
-<!-- <video src="./demo.mp4" controls style="width: 100%"></video> -->
-<video src="./demo.mp4" autoplay loop muted playsinline width="100%">
-</video>
+<img alt="Micracode Demo" src="./demo.gif" style="width: 100%">
 
 <br/>
 <p align="center">

@@ -231,3 +231,8 @@ This project is licensed under the [MIT License](LICENSE).
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to open issues and pull requests.
+
+---
+
+**Join our community** [Discord](https://discord.gg/YmBNWhwdg)
+

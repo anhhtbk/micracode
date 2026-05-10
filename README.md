@@ -84,7 +84,7 @@ Star us, and you will receive all release notifications from GitHub without any 
 - **Bun** ≥ 1.1.0
 - **Python** ≥ 3.12 (managed automatically by `uv`)
 - **uv** ≥ 0.4
-- A **Google Gemini** or **OpenAI** API key
+- A **Google Gemini** or **OpenAI** API key or local model
 
 ### Environment Setup
 

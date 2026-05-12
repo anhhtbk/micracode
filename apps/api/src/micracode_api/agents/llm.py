@@ -53,6 +53,8 @@ class LLMFactory:
                 "streaming": streaming,
                 **kwargs,
             }
+            if settings.openai_base_url:
+                openai_kwargs["base_url"] = settings.openai_base_url
             # GPT-5 reasoning family rejects any temperature other than 1
             # (400 "Unsupported value: 'temperature'..."). Omit the param
             # so the API uses its default; non-reasoning models keep the

@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     # No hard-coded default — callers must set OPENAI_MODEL when provider=openai.
     openai_model: str = Field(default="")
+    # Optional override for OpenAI-compatible endpoints (Azure proxy,
+    # OpenRouter, LiteLLM, vLLM, LM Studio, Together, Groq, …). Empty
+    # string means "use the OpenAI SDK default".
+    openai_base_url: str = Field(default="")
 
     ollama_base_url: str = Field(default="http://localhost:11434")
     # No hard-coded default — callers must set OLLAMA_MODEL when provider=ollama.

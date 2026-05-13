@@ -23,8 +23,6 @@ export function ModelPicker({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  if (catalog?.locked) return null;
-
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -48,6 +46,11 @@ export function ModelPicker({ className }: { className?: string }) {
     const m = p?.models.find((mm) => mm.id === model);
     return m?.label ?? model ?? "Select model";
   }, [catalog, isLoading, model, provider]);
+
+  // Bail AFTER every hook ran — moving this above any hook breaks the
+  // rules of hooks (the catalog flips from null to locked=true after
+  // fetch, changing the hook count between renders).
+  if (catalog?.locked) return null;
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>

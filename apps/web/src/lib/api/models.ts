@@ -26,6 +26,7 @@ export interface ProviderCatalog {
 export interface ModelCatalog {
   providers: ProviderCatalog[];
   default: { provider: string; model: string };
+  locked?: boolean;
 }
 
 export async function getModelCatalog(init?: RequestInit): Promise<ModelCatalog> {

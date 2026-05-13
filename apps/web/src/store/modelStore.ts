@@ -65,7 +65,7 @@ export const useModelStore = create<ModelStoreState>()(
         try {
           const catalog = await getModelCatalog();
           const { provider, model } = get();
-          const keep = isPairInCatalog(catalog, provider, model);
+          const keep = !catalog.locked && isPairInCatalog(catalog, provider, model);
           set({
             catalog,
             provider: keep ? provider : catalog.default.provider,

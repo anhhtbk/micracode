@@ -124,6 +124,7 @@ async def list_catalog(settings: Settings) -> dict:
     return {
         "providers": providers,
         "default": {"provider": default[0], "model": default[1]},
+        "locked": bool(settings.lock_model_selection),
     }
 
 
@@ -179,6 +180,9 @@ def resolve(
       ``ValueError`` so the caller sees a clean error frame instead of a
       provider-SDK auth error.
     """
+    if settings.lock_model_selection:
+        return _default_selection(settings)
+
     if provider is None and model is None:
         return _default_selection(settings)
 

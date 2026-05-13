@@ -23,6 +23,8 @@ export function ModelPicker({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  if (catalog?.locked) return null;
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

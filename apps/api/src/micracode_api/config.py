@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # No hard-coded default — callers must set OLLAMA_MODEL when provider=ollama.
     ollama_model: str = Field(default="")
 
+    # When true, the UI hides the model picker entirely and the client is
+    # forced to use the server-side default `(llm_provider, active_model)`.
+    lock_model_selection: bool = Field(default=False)
+
     @property
     def active_model(self) -> str:
         if self.llm_provider == "openai":

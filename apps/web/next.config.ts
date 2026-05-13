@@ -52,6 +52,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Proxy /api/* to the backend via the docker-internal hostname. Keeps
+  // the API off the public internet — browsers only ever hit the web
+  // origin, this Node-side rewrite forwards into the docker network.
+  // INTERNAL_API_URL is server-only (no NEXT_PUBLIC_ prefix); defaults
+  // to http://api:8000 which matches the compose service name.
+  async rewrites() {
+    const internal = process.env.INTERNAL_API_URL ?? "http://api:8000";
+    return [{ source: "/api/:path*", destination: `${internal}/:path*` }];
+  },
 };
 
 export default nextConfig;

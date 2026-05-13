@@ -22,7 +22,11 @@ FROM oven/bun:${BUN_VERSION} AS builder
 WORKDIR /repo
 
 ARG NEXT_STANDALONE=true
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+# Default to "/api" — the client bundle calls the same origin as the
+# Next.js app, which then proxies to INTERNAL_API_URL inside the docker
+# network (see next.config.ts rewrites). Override only when intentionally
+# pointing the browser at a public API origin.
+ARG NEXT_PUBLIC_API_BASE_URL=/api
 ENV NEXT_STANDALONE=${NEXT_STANDALONE} \
     NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
     NEXT_TELEMETRY_DISABLED=1 \

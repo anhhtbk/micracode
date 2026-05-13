@@ -17,8 +17,13 @@ services:
         required: false
     environment:
       OPENER_APPS_DIR: /app/data
-    ports:
-      - "8000:8000"
+    # No `ports:` — API is reachable only via the docker network. The
+    # web service proxies /api/* to http://api:8000 server-side via
+    # Next.js rewrites, so the API never has to be exposed publicly.
+    # To debug from the host, run: `docker compose exec api curl …`
+    # or temporarily uncomment the block below.
+    # ports:
+    #   - "8000:8000"
     volumes:
       - api-data:/app/data
     healthcheck:
@@ -36,15 +41,11 @@ services:
       target: ${WEB_BUILD_TARGET:-runner-standalone}
       args:
         NEXT_STANDALONE: ${NEXT_STANDALONE:-true}
-        # NEXT_PUBLIC_* vars are inlined at build time, so they must be
-        # passed as build args (runtime `environment:` has no effect).
-        # NEXT_PUBLIC_* is inlined at build time. Empty default keeps
-        # `docker compose pull` / `up` working when consuming the prebuilt
-        # GHCR image (where the URL is already baked in). When building
-        # locally you MUST export NEXT_PUBLIC_API_BASE_URL in `.env` (e.g.
-        # http://localhost:8000 for local, https://api.example.com for prod)
-        # — otherwise the client bundle will fetch from an empty origin.
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        # Defaults to "/api" so the client bundle uses same-origin
+        # requests; Next.js then rewrites them to `INTERNAL_API_URL`
+        # server-side. Override only if you intentionally want the
+        # browser to hit the API directly (e.g. exposing api.* publicly).
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
     image: ghcr.io/${GITHUB_OWNER:-your-github-username}/micracode-web:${TAG:-latest}
     # Always try to pull the GHCR image on `up`. To build locally instead,
     # run `docker compose build web && docker compose up --pull never -d web`.
@@ -53,6 +54,9 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      # Server-only: where Next.js forwards /api/* requests inside the
+      # docker network. `api` resolves to the api service via docker DNS.
+      INTERNAL_API_URL: http://api:8000
     ports:
       - "3000:3000"
     depends_on:

@@ -23,11 +23,11 @@ jobs:
           - name: web
             dockerfile: apps/web/Dockerfile
             image: micracode-web
-            # NEXT_PUBLIC_* vars are inlined into the client bundle at build
-            # time, so the public API origin must be provided here. Configure
-            # `NEXT_PUBLIC_API_BASE_URL` in repo settings → Variables.
+            # Web bundle uses same-origin `/api/*` requests; Next.js
+            # rewrites them to INTERNAL_API_URL inside docker. No public
+            # API origin needs to be baked in.
             build-args: |
-              NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+              NEXT_PUBLIC_API_BASE_URL=/api
           - name: api
             dockerfile: apps/api/Dockerfile
             image: micracode-api
@@ -35,21 +35,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # Fail fast if the web image would be built without a public API origin.
-      # NEXT_PUBLIC_* is inlined into the client bundle at build time, so an
-      # empty value silently ships a broken `latest` image.
-      - name: Validate web build vars
-        if: matrix.name == 'web'
-        env:
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-        run: |
-          if [ -z "${NEXT_PUBLIC_API_BASE_URL}" ]; then
-            echo "::error::Repository variable NEXT_PUBLIC_API_BASE_URL is not set." \
-                 "Configure it in Settings → Secrets and variables → Actions → Variables" \
-                 "(e.g. https://api.example.com). Aborting to avoid publishing a broken web image."
-            exit 1
-          fi
 
       - uses: docker/setup-buildx-action@v3
 

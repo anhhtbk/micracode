@@ -13,20 +13,10 @@ ARG BUN_VERSION=1.3.11
 ARG NODE_VERSION=22.18.0
 
 ############################
-# 1) deps: install workspace deps with Bun
-############################
-FROM oven/bun:${BUN_VERSION} AS deps
-WORKDIR /repo
-
-COPY package.json bunfig.toml ./
-COPY apps/web/package.json ./apps/web/package.json
-COPY packages/shared/package.json ./packages/shared/package.json
-COPY bun.lock* bun.lockb* ./
-
-RUN bun install --frozen-lockfile || bun install
-
-############################
-# 2) builder: copy sources and build Next.js
+# 1) builder: install deps + build Next.js (single Bun stage to keep
+#    workspace symlinks / `.bin` intact — splitting deps into a separate
+#    stage and copying `node_modules` across loses per-workspace bins
+#    that Bun creates at install time).
 ############################
 FROM oven/bun:${BUN_VERSION} AS builder
 WORKDIR /repo
@@ -38,10 +28,20 @@ ENV NEXT_STANDALONE=${NEXT_STANDALONE} \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production
 
-COPY --from=deps /repo/node_modules ./node_modules
+# Manifests first → install layer caches when only source changes.
+# Combine lockfile glob with files that always exist so BuildKit's
+# "at least one source must match" rule is satisfied when no lockfile
+# is committed yet.
+COPY package.json bunfig.toml bun.lock[b]* ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/shared/package.json ./packages/shared/package.json
+
+RUN bun install --frozen-lockfile 2>/dev/null || bun install
+
+# Now copy the rest of the sources and build.
 COPY . .
 
-RUN bun --filter web build
+RUN cd apps/web && bun run build
 
 ############################
 # 3a) runner-standalone: minimal image (Next standalone output)

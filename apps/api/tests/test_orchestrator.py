@@ -8,17 +8,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from micracode_api.agents.context import load_context
-from micracode_api.agents.patcher import ProjectContext
 from micracode_api.config import get_settings
-from micracode_api.schemas.codegen import (
+from micracode_core.context import load_context
+from micracode_core.patcher import ProjectContext
+from micracode_core.schemas.codegen import (
     PatchBundle,
     PatchFile,
     SearchReplace,
 )
-from micracode_api.schemas.project import PromptRecord
-from micracode_api.starter.next_default import NEXT_STARTER_FILES
-from micracode_api.storage import Storage
+from micracode_core.schemas.project import PromptRecord
+from micracode_core.starter.next_default import NEXT_STARTER_FILES
+from micracode_core.storage import Storage
 
 
 def _pr(role: str, content: str, *, idx: int = 0) -> PromptRecord:
@@ -47,7 +47,7 @@ def _make_mock_llm(plan_text: str, bundle: PatchBundle) -> MagicMock:
 
 
 def test_history_to_messages_maps_roles_in_order() -> None:
-    from micracode_api.agents.orchestrator import _history_to_messages
+    from micracode_core.orchestrator import _history_to_messages
 
     records = [
         _pr("user", "build a todo app", idx=1),
@@ -68,7 +68,7 @@ def test_history_to_messages_maps_roles_in_order() -> None:
 
 
 def test_history_to_messages_drops_non_chat_roles() -> None:
-    from micracode_api.agents.orchestrator import _history_to_messages
+    from micracode_core.orchestrator import _history_to_messages
 
     records = [
         _pr("user", "hi", idx=1),
@@ -84,7 +84,7 @@ def test_history_to_messages_drops_non_chat_roles() -> None:
 def test_history_to_messages_caps_by_turn_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
     monkeypatch.setattr(orch, "HISTORY_TURN_CAP", 3)
     monkeypatch.setattr(orch, "HISTORY_CHAR_CAP", 10_000)
@@ -96,7 +96,7 @@ def test_history_to_messages_caps_by_turn_count(
 def test_history_to_messages_caps_by_char_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
     monkeypatch.setattr(orch, "HISTORY_TURN_CAP", 1000)
     monkeypatch.setattr(orch, "HISTORY_CHAR_CAP", 10)
@@ -110,7 +110,7 @@ def test_history_to_messages_caps_by_char_budget(
 
 
 def test_history_to_messages_handles_empty() -> None:
-    from micracode_api.agents.orchestrator import _history_to_messages
+    from micracode_core.orchestrator import _history_to_messages
 
     assert _history_to_messages(None) == []
     assert _history_to_messages([]) == []
@@ -130,7 +130,7 @@ async def test_stream_emits_error_event_when_no_api_key(
     monkeypatch.setenv("OPENAI_API_KEY", "")
     get_settings.cache_clear()
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
     storage.create_project("p5")
     try:
@@ -165,9 +165,9 @@ async def test_stream_planner_exception_surfaced(
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
-    monkeypatch.setattr(orch, "build_llm", lambda provider, model: mock_llm)
+    monkeypatch.setattr(orch, "build_llm", lambda provider, model, config=None: mock_llm)
 
     storage.create_project("p4")
     try:
@@ -204,11 +204,11 @@ async def test_stream_threads_explicit_provider_and_model(
     )
     mock_llm = _make_mock_llm("plan", bundle)
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
     calls: list[tuple[str, str]] = []
 
-    def fake_build(provider: str, model: str):
+    def fake_build(provider: str, model: str, config=None):
         calls.append((provider, model))
         return mock_llm
 
@@ -242,7 +242,7 @@ async def test_stream_rejects_unknown_model(
 
     storage.create_project("p-unknown")
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
     try:
         events = [
@@ -286,9 +286,9 @@ async def test_stream_end_to_end_create(monkeypatch: pytest.MonkeyPatch, storage
     )
     mock_llm = _make_mock_llm("1) Create app/page.tsx.", bundle)
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
-    monkeypatch.setattr(orch, "build_llm", lambda provider, model: mock_llm)
+    monkeypatch.setattr(orch, "build_llm", lambda provider, model, config=None: mock_llm)
 
     try:
         events = [
@@ -345,9 +345,9 @@ async def test_stream_end_to_end_edit_applies_patch(
     )
     mock_llm = _make_mock_llm("1) Swap bg-black for bg-white.", bundle)
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
-    monkeypatch.setattr(orch, "build_llm", lambda provider, model: mock_llm)
+    monkeypatch.setattr(orch, "build_llm", lambda provider, model, config=None: mock_llm)
 
     try:
         events = [
@@ -395,9 +395,9 @@ async def test_stream_patch_mismatch_is_recoverable(
     )
     mock_llm = _make_mock_llm("edit + add", bundle)
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
-    monkeypatch.setattr(orch, "build_llm", lambda provider, model: mock_llm)
+    monkeypatch.setattr(orch, "build_llm", lambda provider, model, config=None: mock_llm)
 
     try:
         events = [
@@ -437,9 +437,9 @@ async def test_stream_threads_history_to_planner_and_codegen(
     )
     mock_llm = _make_mock_llm("plan", bundle)
 
-    from micracode_api.agents import orchestrator as orch
+    from micracode_core import orchestrator as orch
 
-    monkeypatch.setattr(orch, "build_llm", lambda provider, model: mock_llm)
+    monkeypatch.setattr(orch, "build_llm", lambda provider, model, config=None: mock_llm)
 
     history = [
         _pr("user", "earlier turn", idx=1),
@@ -517,7 +517,7 @@ def test_load_context_does_not_flag_modified_files(storage: Storage) -> None:
 
 def test_render_context_block_surfaces_placeholder_hint() -> None:
     """Placeholder files should be called out so the model picks `replace`."""
-    from micracode_api.agents.orchestrator import _render_context_block
+    from micracode_core.orchestrator import _render_context_block
 
     ctx = ProjectContext(
         project_id="p",
@@ -537,7 +537,7 @@ def test_render_context_block_surfaces_placeholder_hint() -> None:
 
 def test_render_context_block_omits_hint_when_no_placeholders() -> None:
     """Without placeholders, the hint line must not be emitted."""
-    from micracode_api.agents.orchestrator import _render_context_block
+    from micracode_core.orchestrator import _render_context_block
 
     ctx = ProjectContext(
         project_id="p",

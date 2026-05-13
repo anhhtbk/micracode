@@ -1,20 +1,4 @@
-"""Catalog of provider/model pairs the API will accept at runtime.
-
-Centralising this here keeps three concerns in one place:
-
-- the allow-list the client picker renders,
-- the allow-list the ``/v1/generate`` endpoint validates against,
-- a fallback resolver used when the client does not specify a model
-  (the first turn after boot, or older clients pinned to env-driven
-  defaults).
-
-API keys are intentionally NOT exposed; ``available`` is a boolean the
-UI uses to disable entries whose server-side key is missing.
-
-Ollama models are fetched dynamically from the local Ollama daemon via
-``GET /api/tags``; the section is omitted entirely if Ollama is not
-running or has no models installed.
-"""
+"""Catalog of provider/model pairs the API will accept at runtime."""
 
 from __future__ import annotations
 
@@ -22,7 +6,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from ..config import Settings
+from .config import CoreConfig
 
 ProviderId = str
 
@@ -40,9 +24,6 @@ class _Provider:
     models: tuple[_Model, ...]
 
 
-# Registry for static (cloud) providers. To add a new model ID, append a
-# ``_Model`` entry below; no other changes are required for it to show up
-# in the UI picker.
 _PROVIDERS: tuple[_Provider, ...] = (
     _Provider(
         id="openai",
@@ -76,16 +57,15 @@ def _has_model(provider: _Provider, model_id: str) -> bool:
     return any(m.id == model_id for m in provider.models)
 
 
-def _provider_available(settings: Settings, pid: str) -> bool:
+def _provider_available(config: CoreConfig, pid: str) -> bool:
     if pid == "openai":
-        return bool(settings.openai_api_key)
+        return bool(config.openai_api_key)
     if pid == "gemini":
-        return bool(settings.google_api_key)
+        return bool(config.google_api_key)
     return False
 
 
 async def _fetch_ollama_models(base_url: str) -> list[str]:
-    """Return installed model names from the local Ollama daemon, or [] on any error."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{base_url}/api/tags")
@@ -96,19 +76,19 @@ async def _fetch_ollama_models(base_url: str) -> list[str]:
         return []
 
 
-async def list_catalog(settings: Settings) -> dict:
+async def list_catalog(config: CoreConfig) -> dict:
     """Serialise the registry for the public ``GET /v1/models`` endpoint."""
     providers = [
         {
             "id": p.id,
             "label": p.label,
-            "available": _provider_available(settings, p.id),
+            "available": _provider_available(config, p.id),
             "models": [{"id": m.id, "label": m.label} for m in p.models],
         }
         for p in _PROVIDERS
     ]
 
-    ollama_models = await _fetch_ollama_models(settings.ollama_base_url)
+    ollama_models = await _fetch_ollama_models(config.ollama_base_url)
     if ollama_models:
         providers.append(
             {
@@ -119,7 +99,7 @@ async def list_catalog(settings: Settings) -> dict:
             }
         )
 
-    default = _default_selection(settings, ollama_models)
+    default = _default_selection(config, ollama_models)
 
     return {
         "providers": providers,
@@ -128,16 +108,10 @@ async def list_catalog(settings: Settings) -> dict:
 
 
 def _default_selection(
-    settings: Settings, ollama_models: list[str] | None = None
+    config: CoreConfig, ollama_models: list[str] | None = None
 ) -> tuple[str, str]:
-    """Pick a sensible default for clients that haven't chosen yet.
-
-    Prefers ``settings.llm_provider`` + ``settings.active_model`` when valid;
-    otherwise falls back to the first available provider, then the first
-    provider overall.
-    """
-    env_provider = settings.llm_provider
-    env_model = settings.active_model
+    env_provider = config.llm_provider
+    env_model = config.active_model
 
     if env_provider == "ollama":
         if env_model:
@@ -150,7 +124,7 @@ def _default_selection(
             return (env_provider, env_model)
 
     for p in _PROVIDERS:
-        if _provider_available(settings, p.id) and p.models:
+        if _provider_available(config, p.id) and p.models:
             return (p.id, p.models[0].id)
 
     if ollama_models:
@@ -163,24 +137,11 @@ def _default_selection(
 def resolve(
     provider: str | None,
     model: str | None,
-    settings: Settings,
+    config: CoreConfig,
 ) -> tuple[str, str]:
-    """Validate a requested ``(provider, model)`` pair, filling in defaults.
-
-    Rules:
-
-    - Missing provider+model -> use :func:`_default_selection`.
-    - Partial input -> reject with ``ValueError``; requiring both together
-      keeps the contract simple (the UI always sends both or neither).
-    - For ``ollama``: any non-empty model name is accepted (pass-through);
-      validation happens at generation time via the Ollama daemon.
-    - Unknown provider or model id (not in the static registry) -> ``ValueError``.
-    - Provider whose API key is not configured on the server ->
-      ``ValueError`` so the caller sees a clean error frame instead of a
-      provider-SDK auth error.
-    """
+    """Validate a requested ``(provider, model)`` pair, filling in defaults."""
     if provider is None and model is None:
-        return _default_selection(settings)
+        return _default_selection(config)
 
     if provider is None or model is None:
         raise ValueError(
@@ -207,7 +168,7 @@ def resolve(
             f"supported models: {allowed}."
         )
 
-    if not _provider_available(settings, p.id):
+    if not _provider_available(config, p.id):
         env_var = "OPENAI_API_KEY" if p.id == "openai" else "GOOGLE_API_KEY"
         raise ValueError(
             f"Provider {p.id!r} is selected but {env_var} is not configured "

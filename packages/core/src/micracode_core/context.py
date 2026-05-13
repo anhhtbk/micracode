@@ -1,39 +1,21 @@
-"""Select the slice of a project that the LLM should see for one turn.
-
-The orchestrator calls :func:`load_context` once per request. It returns a
-:class:`ProjectContext` containing:
-
-  * ``tree_summary`` — newline-separated ``path (size)`` listing, used in the
-    system/user prompt so the model knows which files exist.
-  * ``files`` — a pre-loaded dict of file contents the model most likely
-    needs, capped at :data:`CONTEXT_CHAR_BUDGET` total characters.
-  * ``loader`` — a callable the patcher can use to read any other file on
-    demand (e.g. when the model decides to edit something we didn't guess).
-
-This is the single place to iterate on context quality; the loop does not
-care how files are chosen.
-"""
+"""Select the slice of a project that the LLM should see for one turn."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..starter.next_default import NEXT_STARTER_FILES
-from ..storage import Storage, safe_join
+from .starter.next_default import NEXT_STARTER_FILES
+from .storage import Storage, safe_join
 from .patcher import FileLoader, ProjectContext
 
 CONTEXT_CHAR_BUDGET = 40_000
 ALWAYS_LOAD = ("app/page.tsx", "app/layout.tsx", "app/globals.css")
 MAX_TREE_ENTRIES = 400
 
-# Paths in the default Next.js scaffold we treat as disposable placeholders
-# when they still hold their original contents. Full-file replacement of
-# these is safer than targeted edits because the bodies are tiny.
 _PLACEHOLDER_CANDIDATES = ("app/page.tsx", "app/layout.tsx", "app/globals.css")
 
 
 def _flatten(tree: dict[str, Any], prefix: str = "") -> list[tuple[str, int]]:
-    """Walk a WebContainer-shaped tree into ``[(path, size_chars), ...]``."""
     out: list[tuple[str, int]] = []
     for name, node in tree.items():
         path = f"{prefix}{name}" if not prefix else f"{prefix}/{name}"
@@ -47,7 +29,6 @@ def _flatten(tree: dict[str, Any], prefix: str = "") -> list[tuple[str, int]]:
 
 
 def _read_from_tree(tree: dict[str, Any], path: str) -> str | None:
-    """Retrieve file contents previously flattened out of the tree."""
     parts = path.split("/")
     node: Any = tree
     for i, part in enumerate(parts):
@@ -69,10 +50,6 @@ def _read_from_tree(tree: dict[str, Any], path: str) -> str | None:
 
 
 def _mentioned_paths(prompt: str, candidates: list[str]) -> list[str]:
-    """Paths the user named literally in their prompt.
-
-    Simple substring match on the full relative path and on the basename.
-    """
     hits: list[str] = []
     for path in candidates:
         base = path.rsplit("/", 1)[-1]
@@ -82,7 +59,6 @@ def _mentioned_paths(prompt: str, candidates: list[str]) -> list[str]:
 
 
 def _build_loader(storage: Storage, project_id: str) -> FileLoader:
-    """Create a :class:`FileLoader` that reads text files from disk safely."""
     root = storage.project_dir(project_id)
 
     def _load(path: str) -> str | None:
@@ -105,11 +81,6 @@ def load_context(
     project_id: str,
     prompt: str,
 ) -> ProjectContext:
-    """Build a :class:`ProjectContext` for the current request.
-
-    Never raises for a missing project — an empty context is returned so the
-    orchestrator can still produce ``create`` ops for a brand-new tree.
-    """
     try:
         tree = storage.read_tree(project_id)
     except FileNotFoundError:
@@ -123,7 +94,7 @@ def load_context(
     tree_summary = "\n".join(summary_lines)
 
     candidate_paths = [p for p, _ in flat]
-    wanted = list(dict.fromkeys(  # preserve order, dedupe
+    wanted = list(dict.fromkeys(
         [p for p in ALWAYS_LOAD if p in candidate_paths]
         + _mentioned_paths(prompt, candidate_paths)
     ))

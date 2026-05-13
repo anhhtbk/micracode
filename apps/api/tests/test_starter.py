@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
-from micracode_api.starter.next_default import NEXT_STARTER_FILES
-from micracode_api.storage import Storage
+from micracode_core.starter.next_default import NEXT_STARTER_FILES
+from micracode_core.storage import Storage
 
 
 REQUIRED_PATHS = (

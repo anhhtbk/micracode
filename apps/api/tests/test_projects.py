@@ -180,7 +180,7 @@ def test_prompts_endpoint_returns_history(
 ) -> None:
     record = client.post("/v1/projects", json={"name": "Demo"}).json()
     # Seed a prompt via the storage module so we don't need the SSE stream here.
-    from micracode_api.storage import Storage
+    from micracode_core.storage import Storage
 
     storage = Storage(opener_apps_dir)
     storage.append_prompt(record["id"], "user", "hi there")
@@ -196,7 +196,7 @@ def test_prompts_endpoint_returns_history(
 def test_pop_last_assistant_prompt_endpoint(
     client: TestClient, opener_apps_dir
 ) -> None:
-    from micracode_api.storage import Storage
+    from micracode_core.storage import Storage
 
     record = client.post("/v1/projects", json={"name": "Pop"}).json()
     pid = record["id"]
@@ -232,7 +232,7 @@ def test_list_snapshots_empty(client: TestClient) -> None:
 def test_snapshot_restore_round_trip(
     client: TestClient, opener_apps_dir
 ) -> None:
-    from micracode_api.storage import Storage
+    from micracode_core.storage import Storage
 
     record = client.post("/v1/projects", json={"name": "Round"}).json()
     pid = record["id"]
@@ -279,7 +279,7 @@ def test_snapshot_restore_rejects_traversal(client: TestClient) -> None:
 
 
 def test_snapshot_delete(client: TestClient, opener_apps_dir) -> None:
-    from micracode_api.storage import Storage
+    from micracode_core.storage import Storage
 
     record = client.post("/v1/projects", json={"name": "Del Snap"}).json()
     pid = record["id"]

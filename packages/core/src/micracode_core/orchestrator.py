@@ -1,13 +1,9 @@
 """Plain-Python orchestrator for the codegen loop (no LangGraph).
 
 One async generator, two LLM calls (plan, codegen), one patch-apply pass.
-State flows as function arguments; events are ``yield``-ed to the SSE
-router. File writes and deletes are persisted to storage here, before
-the matching event is yielded, so storage and the client tree stay in sync.
-
-History threading (``_history_to_messages``) and ``CodegenError`` are
-preserved here so router code and tests can keep importing them through
-``agents.orchestrator`` without churn.
+State flows as function arguments; events are ``yield``-ed to the caller.
+File writes and deletes are persisted to storage here, before the matching
+event is yielded, so storage and the client tree stay in sync.
 """
 
 from __future__ import annotations
@@ -21,10 +17,10 @@ import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from ..config import get_settings
-from ..schemas.codegen import PatchBundle
-from ..schemas.project import PromptRecord
-from ..schemas.stream import (
+from .config import CoreConfig
+from .schemas.codegen import PatchBundle
+from .schemas.project import PromptRecord
+from .schemas.stream import (
     ErrorEvent,
     FileDeleteEvent,
     FileWriteEvent,
@@ -32,7 +28,7 @@ from ..schemas.stream import (
     StatusEvent,
     StreamEvent,
 )
-from ..storage import Storage, get_storage
+from .storage import Storage
 from . import model_catalog
 from .context import load_context
 from .llm import LLMFactory
@@ -42,24 +38,18 @@ from .prompts import CODEGEN_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-def _missing_api_key_message(provider: str | None = None) -> str:
-    """Build a provider-aware error message for a missing API key."""
-    resolved = provider or get_settings().llm_provider
-    env_var = "OPENAI_API_KEY" if resolved == "openai" else "GOOGLE_API_KEY"
+def _missing_api_key_message(provider: str, config: CoreConfig) -> str:
+    env_var = "OPENAI_API_KEY" if provider == "openai" else "GOOGLE_API_KEY"
     return f"Server is not configured with a {env_var}; cannot generate code."
 
 
-def build_llm(provider: str, model: str) -> BaseChatModel:
+def build_llm(provider: str, model: str, config: CoreConfig | None = None) -> BaseChatModel:
     """Seam used by ``_plan`` / ``_codegen``; tests monkeypatch this."""
-    return LLMFactory.build(provider=provider, model=model)
+    return LLMFactory.build(config, provider=provider, model=model)
 
 
-# Bounds for prior-turn context. Mirrors the previous graph-based limits.
 HISTORY_TURN_CAP = 20
 HISTORY_CHAR_CAP = 12_000
-
-# Truncate per-file bodies we send back to the model for edit ops so a
-# single huge file cannot blow the context window.
 CONTEXT_FILE_DISPLAY_CAP = 12_000
 
 
@@ -70,13 +60,6 @@ class CodegenError(RuntimeError):
 def _history_to_messages(
     records: list[PromptRecord] | None,
 ) -> list[BaseMessage]:
-    """Convert persisted prompts into LangChain messages, bounded in size.
-
-    Keeps only ``user``/``assistant`` turns (drops ``system``/``tool``).
-    Iterates from the tail so the most recent context is preserved, then
-    reverses back into chronological order. Stops when either
-    :data:`HISTORY_TURN_CAP` or :data:`HISTORY_CHAR_CAP` is hit.
-    """
     if not records:
         return []
 
@@ -100,7 +83,6 @@ def _history_to_messages(
 
 
 def _render_context_block(context: ProjectContext) -> str:
-    """Format the project snapshot for inclusion in the user message."""
     if not context.tree_summary and not context.files:
         return "Current project: (empty — this is the first turn)."
 
@@ -137,10 +119,10 @@ async def _plan(
     *,
     provider: str,
     model: str,
+    config: CoreConfig,
 ) -> str:
-    """Run the planner LLM call and return the plan text."""
     try:
-        llm = build_llm(provider, model)
+        llm = build_llm(provider, model, config)
         msg = await llm.ainvoke(
             [
                 SystemMessage(content=PLANNER_SYSTEM_PROMPT),
@@ -172,8 +154,8 @@ async def _codegen(
     *,
     provider: str,
     model: str,
+    config: CoreConfig,
 ) -> PatchBundle:
-    """Run the codegen LLM call with structured output."""
     human = (
         f"{_render_context_block(context)}\n\n"
         f"User request:\n{prompt or '(empty)'}\n\n"
@@ -185,7 +167,7 @@ async def _codegen(
     )
 
     try:
-        llm = build_llm(provider, model)
+        llm = build_llm(provider, model, config)
         structured = llm.with_structured_output(PatchBundle)
         result = await structured.ainvoke(
             [
@@ -213,23 +195,11 @@ async def run_codegen_stream(
     prompt: str,
     history: list[PromptRecord] | None = None,
     storage: Storage | None = None,
+    config: CoreConfig | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> AsyncIterator[StreamEvent]:
-    """Execute the codegen loop and yield :class:`StreamEvent` items.
-
-    ``history`` should be the prior conversation on this project **excluding**
-    the current prompt. ``storage`` defaults to the process-wide instance
-    and is used to read the current project state for context selection.
-
-    ``provider`` and ``model`` are the client's per-request selection. When
-    either is omitted the server-side default (from env / catalog) is used.
-
-    On any :class:`CodegenError` a single ``ErrorEvent`` frame is emitted
-    and the stream ends (no ``status: done``). Individual patch failures
-    surface as *recoverable* error events so the stream continues.
-    """
-    current = get_settings()
+    current = config or CoreConfig()
 
     yield StatusEvent(stage="planning", note="Reading project")
 
@@ -256,16 +226,16 @@ async def run_codegen_stream(
             return
     if resolved_provider == "openai" and not current.openai_api_key:
         yield ErrorEvent(
-            message=_missing_api_key_message("openai"), recoverable=False
+            message=_missing_api_key_message("openai", current), recoverable=False
         )
         return
     if resolved_provider == "gemini" and not current.google_api_key:
         yield ErrorEvent(
-            message=_missing_api_key_message("gemini"), recoverable=False
+            message=_missing_api_key_message("gemini", current), recoverable=False
         )
         return
 
-    store = storage or get_storage()
+    store = storage or Storage(current.opener_apps_dir)
 
     try:
         context = load_context(store, project_id, prompt)
@@ -283,6 +253,7 @@ async def run_codegen_stream(
             context,
             provider=resolved_provider,
             model=resolved_model,
+            config=current,
         )
     except CodegenError as exc:
         logger.warning("codegen plan failed: %s", exc)
@@ -303,6 +274,7 @@ async def run_codegen_stream(
             context,
             provider=resolved_provider,
             model=resolved_model,
+            config=current,
         )
     except CodegenError as exc:
         logger.warning("codegen failed: %s", exc)
@@ -315,10 +287,6 @@ async def run_codegen_stream(
         yield ErrorEvent(message=f"codegen crashed: {exc}", recoverable=False)
         return
 
-    # Snapshot the project *after* codegen returned a usable bundle but
-    # *before* applying any file ops. That way a failed LLM call or a
-    # cancel during planning doesn't leave an empty snapshot behind, but
-    # the user can still roll back past any writes that follow.
     snapshot_id: str | None = None
     try:
         record = store.create_snapshot(project_id, user_prompt=prompt)

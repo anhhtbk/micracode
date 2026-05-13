@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from micracode_api.storage import SLUG_RE, Storage, safe_join, slugify
+from micracode_core.storage import SLUG_RE, Storage, safe_join, slugify
 
 
 class TestSlugify:
@@ -63,7 +64,20 @@ class TestSafeJoin:
         with pytest.raises(ValueError):
             safe_join(tmp_path, "a/b/../../../etc")
 
+    @pytest.mark.skipif(
+        not hasattr(os, "symlink"),
+        reason="symlinks not supported on this platform",
+    )
     def test_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        import ctypes
+        is_admin = False
+        try:
+            is_admin = ctypes.windll.shell32.IsUserAnAdmin()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        if not is_admin:
+            pytest.skip("symlink creation requires admin rights on Windows")
+
         outside = tmp_path.parent / "outside-target"
         outside.mkdir(exist_ok=True)
         try:

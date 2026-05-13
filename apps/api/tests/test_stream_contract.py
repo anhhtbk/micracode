@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from micracode_api.schemas.stream import (
+from micracode_core.schemas.stream import (
     ErrorEvent,
     FileDeleteEvent,
     FileWriteEvent,

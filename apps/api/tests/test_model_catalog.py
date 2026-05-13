@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from micracode_api.agents import model_catalog
 from micracode_api.config import Settings
+from micracode_core import model_catalog
 
 
 def _settings(**overrides: object) -> Settings:
@@ -20,8 +20,8 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
-def test_list_catalog_flags_availability_per_key() -> None:
-    catalog = model_catalog.list_catalog(
+async def test_list_catalog_flags_availability_per_key() -> None:
+    catalog = await model_catalog.list_catalog(
         _settings(openai_api_key="sk-x", google_api_key="")
     )
     providers = {p["id"]: p for p in catalog["providers"]}
@@ -31,8 +31,8 @@ def test_list_catalog_flags_availability_per_key() -> None:
     assert all({"id", "label"} <= m.keys() for m in providers["openai"]["models"])
 
 
-def test_list_catalog_default_prefers_settings_when_valid() -> None:
-    catalog = model_catalog.list_catalog(
+async def test_list_catalog_default_prefers_settings_when_valid() -> None:
+    catalog = await model_catalog.list_catalog(
         _settings(
             llm_provider="openai",
             openai_api_key="sk-x",
@@ -42,8 +42,8 @@ def test_list_catalog_default_prefers_settings_when_valid() -> None:
     assert catalog["default"] == {"provider": "openai", "model": "gpt-4.1"}
 
 
-def test_list_catalog_default_falls_back_when_env_model_unregistered() -> None:
-    catalog = model_catalog.list_catalog(
+async def test_list_catalog_default_falls_back_when_env_model_unregistered() -> None:
+    catalog = await model_catalog.list_catalog(
         _settings(
             llm_provider="openai",
             openai_api_key="sk-x",

@@ -1,0 +1,38 @@
+[project]
+name = "micracode"
+version = "0.1.0"
+description = "AI-powered web app builder. Run anywhere with pip install micracode."
+requires-python = ">=3.12"
+authors = [{ name = "Micracode" }]
+license = { text = "MIT" }
+
+dependencies = [
+    "micracode-core>=0.1.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sse-starlette>=2.1.0",
+    "orjson>=3.10.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+micracode = "micracode.cli:app"
+
+[tool.uv.sources]
+micracode-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/micracode"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]

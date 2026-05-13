@@ -12,8 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Event(BaseModel):
-    """Base event with strict, extras-forbidden config."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
@@ -43,9 +41,6 @@ class StatusEvent(_Event):
     type: Literal["status"] = "status"
     stage: Literal["planning", "generating", "done", "cancelled"]
     note: str | None = None
-    # Populated on the ``generating`` stage to attach the pre-turn
-    # snapshot id to the assistant's message so the UI can offer a
-    # "revert to before this message" action.
     snapshot_id: str | None = None
 
 
@@ -74,14 +69,6 @@ class GenerateRequest(BaseModel):
     project_id: str = Field(min_length=1, max_length=128)
     prompt: str = Field(min_length=1, max_length=16000)
     history: list[dict[str, str]] | None = None
-    # When true, the caller is retrying the previous turn; the prompt is
-    # already present in ``prompts.jsonl`` so we skip the append to avoid
-    # duplicates. The assistant row (if any) should already have been
-    # popped via ``POST /v1/projects/{id}/prompts/pop-assistant``.
     retry: bool = False
-    # Per-request model selection. Both fields must be supplied together,
-    # or both omitted (to fall back to the server default). The registry
-    # in ``agents/model_catalog.py`` is the source of truth for allowed
-    # combinations; ``GET /v1/models`` exposes it to the UI.
     provider: Literal["openai", "gemini"] | None = None
     model: str | None = Field(default=None, max_length=128)

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from micracode_api.agents.patcher import (
+from micracode_core.patcher import (
     PatchError,
     ProjectContext,
     apply_bundle,
     apply_patch,
 )
-from micracode_api.schemas.codegen import (
+from micracode_core.schemas.codegen import (
     MAX_FILE_CONTENT_CHARS,
     PatchBundle,
     PatchFile,

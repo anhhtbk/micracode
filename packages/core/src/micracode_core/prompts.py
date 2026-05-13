@@ -1,10 +1,4 @@
-"""System prompts for the custom codegen orchestrator.
-
-Two-stage flow: the planner narrates the change in English, then the
-codegen model emits a :class:`PatchBundle` of file-level ops. Prior
-conversation turns are threaded into both calls so follow-ups like
-"make the header sticky" reason about the existing project state.
-"""
+"""System prompts for the two-stage codegen orchestrator."""
 
 from __future__ import annotations
 

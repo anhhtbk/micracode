@@ -1,18 +1,4 @@
-"""Local-filesystem storage for projects, generated code, and chat history.
-
-Layout on disk::
-
-    <opener_apps_dir>/
-      <slug>/                       # actual app source (git-friendly)
-        app/page.tsx
-        package.json
-        .micracode/
-          project.json              # metadata
-          prompts.jsonl             # append-only chat history
-
-All writes coming from user input or LLM events are routed through
-``safe_join`` to guarantee they never escape the project directory.
-"""
+"""Local-filesystem storage for projects, generated code, and chat history."""
 
 from __future__ import annotations
 
@@ -30,7 +16,6 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from .config import get_settings
 from .schemas.project import ProjectRecord, PromptRecord, PromptRole, SnapshotRecord
 from .starter.next_default import NEXT_STARTER_FILES
 
@@ -43,13 +28,8 @@ SNAPSHOTS_DIR = "snapshots"
 SNAPSHOT_FILES_DIR = "files"
 SNAPSHOT_META_FILE = "project.json"
 
-# Keep at most this many most-recent snapshots per project. Older ones are
-# pruned after ``create_snapshot`` so long projects don't balloon the disk.
 SNAPSHOT_KEEP = 20
 
-# Pattern that must match a snapshot id. Enforced anywhere we resolve a
-# user-supplied snapshot id onto the filesystem to guarantee we never
-# ``rmtree`` an unexpected path.
 SNAPSHOT_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$")
 
 _IGNORED_TOP_LEVEL: frozenset[str] = frozenset(
@@ -61,23 +41,11 @@ _prompt_adapter = TypeAdapter(PromptRecord)
 _snapshot_adapter = TypeAdapter(SnapshotRecord)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _now() -> datetime:
     return datetime.now(UTC)
 
 
 def slugify(name: str) -> str:
-    """Lowercase kebab-case slug matching :data:`SLUG_RE`.
-
-    Strips diacritic-free punctuation, collapses runs of non-alphanum chars
-    into ``-``, trims leading/trailing dashes and digits-only prefix dashes,
-    and truncates to 63 chars. Returns an empty string for unusable input.
-    """
-
     cleaned = name.strip().lower()
     cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
     cleaned = cleaned.strip("-")
@@ -88,12 +56,7 @@ def slugify(name: str) -> str:
 
 
 def safe_join(root: Path, rel: str | os.PathLike[str]) -> Path:
-    """Resolve *rel* against *root*, blocking traversal + absolute paths.
-
-    Raises ``ValueError`` if the joined, fully-resolved path escapes *root*
-    (including symlink traversal).
-    """
-
+    """Resolve *rel* against *root*, blocking traversal + absolute paths."""
     rel_path = Path(rel)
     if rel_path.is_absolute():
         raise ValueError(f"absolute paths are not allowed: {rel!r}")
@@ -107,11 +70,6 @@ def safe_join(root: Path, rel: str | os.PathLike[str]) -> Path:
     return candidate
 
 
-# ---------------------------------------------------------------------------
-# Storage
-# ---------------------------------------------------------------------------
-
-
 class Storage:
     """Stateless-ish helper bound to a single root directory."""
 
@@ -119,12 +77,8 @@ class Storage:
         self.root = root.expanduser().resolve()
         self._write_lock = Lock()
 
-    # -- root ---------------------------------------------------------------
-
     def ensure_root(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-
-    # -- paths --------------------------------------------------------------
 
     def project_dir(self, slug: str) -> Path:
         self._validate_slug(slug)
@@ -138,8 +92,6 @@ class Storage:
         if not SLUG_RE.fullmatch(slug):
             raise ValueError(f"invalid project id: {slug!r}")
 
-    # -- slug generation ----------------------------------------------------
-
     def unique_slug(self, name: str) -> str:
         base = slugify(name)
         if not base:
@@ -151,8 +103,6 @@ class Storage:
             candidate = f"{base[: 63 - len(suffix)]}{suffix}"
             n += 1
         return candidate
-
-    # -- project CRUD -------------------------------------------------------
 
     def create_project(self, name: str, template: str = "next") -> ProjectRecord:
         self.ensure_root()
@@ -182,18 +132,6 @@ class Storage:
         return record
 
     def ensure_next_preview_layout(self, slug: str) -> None:
-        """Backfill starter files for Next projects missing preview prerequisites.
-
-        Called when serving the file tree so older projects (created before
-        on-create seeding) still get a root ``package.json`` with ``scripts.dev``.
-        Writes starter paths that are missing, then ensures ``scripts.dev`` and
-        merges in any required design-toolkit dependencies (Tailwind, PostCSS,
-        etc.) that a legacy ``package.json`` may be missing. Without this merge,
-        an older project whose ``package.json`` predates the toolkit upgrade
-        would fail at ``npm install`` time when the generator emits
-        ``postcss.config.mjs`` + ``tailwind.config.ts``.
-        """
-
         rec = self._try_read_project_json(slug)
         if rec is None or rec.template != "next":
             return
@@ -228,16 +166,6 @@ class Storage:
         self.write_file(slug, "package.json", json.dumps(data, indent=2) + "\n")
 
     def _ensure_starter_dependencies(self, slug: str) -> None:
-        """Merge required starter deps into an existing ``package.json``.
-
-        The design toolkit (Tailwind, PostCSS, lucide-react, framer-motion,
-        etc.) must be declared in ``package.json`` for WebContainer's ``npm
-        install`` to fetch them; otherwise Next's PostCSS pipeline throws
-        ``Cannot find module 'tailwindcss'``. Legacy projects created before
-        the toolkit upgrade still have the old, minimal ``package.json`` on
-        disk — this method backfills the missing entries without disturbing
-        anything the user / LLM has already added.
-        """
         pkg_path = safe_join(self.project_dir(slug), "package.json")
         if not pkg_path.is_file():
             return
@@ -303,16 +231,12 @@ class Storage:
             return False
         try:
             target.relative_to(self.root)
-        except ValueError as exc:  # pragma: no cover - defensive
+        except ValueError as exc:
             raise ValueError("refusing to delete path outside storage root") from exc
         shutil.rmtree(target)
         return True
 
-    # -- file tree ----------------------------------------------------------
-
     def read_tree(self, slug: str) -> dict[str, Any]:
-        """Return a WebContainer-shaped ``FileSystemTree`` dict."""
-
         proj = self.project_dir(slug)
         if not proj.exists():
             raise FileNotFoundError(slug)
@@ -336,8 +260,6 @@ class Storage:
             return tree
 
         return walk(proj, is_root=True)
-
-    # -- file writes --------------------------------------------------------
 
     def write_file(self, slug: str, rel_path: str, content: str) -> Path:
         proj = self.project_dir(slug)
@@ -364,8 +286,6 @@ class Storage:
                 target.unlink()
         self._touch_project(slug)
         return True
-
-    # -- prompts ------------------------------------------------------------
 
     def append_prompt(
         self,
@@ -405,21 +325,11 @@ class Storage:
                     continue
                 try:
                     records.append(_prompt_adapter.validate_json(line))
-                except Exception:  # noqa: BLE001 - skip corrupt rows
+                except Exception:  # noqa: BLE001
                     continue
         return records
 
     def pop_last_assistant_prompt(self, slug: str) -> PromptRecord | None:
-        """Atomically drop the last ``assistant`` row from ``prompts.jsonl``.
-
-        Used by retry: when the user wants to redo the previous turn, we
-        strip the bad reply first so the re-issued codegen call appends a
-        fresh assistant message rather than piling up duplicates.
-
-        Returns the dropped record, or ``None`` if the file is empty or
-        the last non-assistant row is not an assistant row.
-        """
-
         path = self.sidecar_dir(slug) / PROMPTS_FILE
         if not path.exists():
             return None
@@ -434,7 +344,7 @@ class Storage:
                     continue
                 try:
                     rec = _prompt_adapter.validate_json(line)
-                except Exception:  # noqa: BLE001 - skip corrupt rows
+                except Exception:  # noqa: BLE001
                     continue
                 if rec.role == "assistant":
                     drop_idx = i
@@ -454,8 +364,6 @@ class Storage:
         self._touch_project(slug)
         return dropped
 
-    # -- snapshots ----------------------------------------------------------
-
     def _snapshots_dir(self, slug: str) -> Path:
         return self.sidecar_dir(slug) / SNAPSHOTS_DIR
 
@@ -469,32 +377,18 @@ class Storage:
         stamp = now.strftime("%Y%m%dT%H%M%SZ")
         return f"{stamp}-{uuid.uuid4().hex[:4]}"
 
-    def create_snapshot(
-        self, slug: str, *, user_prompt: str = ""
-    ) -> SnapshotRecord:
-        """Capture the current project tree for later rollback.
-
-        Copies everything under ``project_dir(slug)`` except the ignored
-        top-level entries (sidecar, ``node_modules``, build output, etc.)
-        into ``.micracode/snapshots/<id>/files/``. Writes a metadata
-        ``project.json`` alongside it.
-
-        Prunes older snapshots beyond :data:`SNAPSHOT_KEEP`.
-        """
-
+    def create_snapshot(self, slug: str, *, user_prompt: str = "") -> SnapshotRecord:
         proj = self.project_dir(slug)
         if not proj.exists():
             raise FileNotFoundError(slug)
 
         created_at = _now()
-        # In the unlikely event of a collision on the same-second stamp,
-        # loop until we get a unique id.
         for _ in range(8):
             snapshot_id = self._new_snapshot_id(created_at)
             dest = self._snapshot_dir(slug, snapshot_id)
             if not dest.exists():
                 break
-        else:  # pragma: no cover - astronomically unlikely
+        else:
             raise RuntimeError("failed to allocate unique snapshot id")
 
         record = SnapshotRecord(
@@ -551,22 +445,12 @@ class Storage:
                 records.append(
                     _snapshot_adapter.validate_json(meta.read_text(encoding="utf-8"))
                 )
-            except Exception:  # noqa: BLE001 - skip corrupt metadata
+            except Exception:  # noqa: BLE001
                 continue
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
     def restore_snapshot(self, slug: str, snapshot_id: str) -> bool:
-        """Reset the project tree to the contents of the given snapshot.
-
-        Deletes every non-ignored top-level entry in the project dir,
-        then copies the snapshot's ``files/`` contents back into place.
-        Ignored entries (``node_modules``, ``.next``, etc.) are left
-        untouched so running preview state survives a restore.
-
-        Returns ``False`` if the snapshot does not exist.
-        """
-
         proj = self.project_dir(slug)
         if not proj.exists():
             raise FileNotFoundError(slug)
@@ -604,7 +488,7 @@ class Storage:
         target = snap_dir.resolve()
         try:
             target.relative_to(self._snapshots_dir(slug).resolve())
-        except ValueError as exc:  # pragma: no cover - defensive
+        except ValueError as exc:
             raise ValueError("refusing to delete path outside snapshots root") from exc
         with self._write_lock:
             shutil.rmtree(target)
@@ -617,10 +501,8 @@ class Storage:
         for rec in records[SNAPSHOT_KEEP:]:
             try:
                 self.delete_snapshot(slug, rec.id)
-            except Exception:  # noqa: BLE001 - pruning is best-effort
+            except Exception:  # noqa: BLE001
                 continue
-
-    # -- internals ----------------------------------------------------------
 
     def _project_json_path(self, slug: str) -> Path:
         return self.sidecar_dir(slug) / PROJECT_FILE
@@ -640,7 +522,7 @@ class Storage:
             return None
         try:
             return _project_adapter.validate_json(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001 - tolerate corrupted metadata
+        except Exception:  # noqa: BLE001
             return None
 
     def _touch_project(self, slug: str) -> None:
@@ -651,19 +533,13 @@ class Storage:
         self._write_project_json(slug, updated)
 
 
-# ---------------------------------------------------------------------------
-# Module-level accessor
-# ---------------------------------------------------------------------------
-
-
 @lru_cache(maxsize=1)
 def get_storage() -> Storage:
-    return Storage(get_settings().opener_apps_dir)
+    from .config import CoreConfig
+    return Storage(CoreConfig().opener_apps_dir)
 
 
 def reset_storage_cache() -> None:
-    """Invalidate the :func:`get_storage` cache (tests + config changes)."""
-
     get_storage.cache_clear()
 
 

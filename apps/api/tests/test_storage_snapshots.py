@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from micracode_api import storage as storage_module
-from micracode_api.storage import (
+from micracode_core import storage as storage_module
+from micracode_core.storage import (
     SNAPSHOT_FILES_DIR,
     SNAPSHOT_ID_RE,
     Storage,

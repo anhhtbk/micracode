@@ -1,10 +1,4 @@
-"""Structured LLM output for the codegen orchestrator.
-
-The model emits a :class:`PatchBundle` describing per-file operations. This
-lets follow-up turns produce small search-and-replace edits rather than
-re-emitting whole files, which is cheaper and higher fidelity for iterative
-UI tweaks. New files still use ``create`` (full content).
-"""
+"""Structured LLM output for the codegen orchestrator."""
 
 from __future__ import annotations
 
@@ -22,13 +16,6 @@ Operation = Literal["create", "replace", "edit", "delete"]
 
 
 class SearchReplace(BaseModel):
-    """One search-and-replace op applied to an existing file.
-
-    ``search`` must appear EXACTLY ONCE in the current file contents. The
-    replacement is literal (no regex). The orchestrator runs ops sequentially
-    on the buffer so later ops can depend on earlier ones.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     search: str = Field(
@@ -46,15 +33,6 @@ class SearchReplace(BaseModel):
 
 
 class PatchFile(BaseModel):
-    """One file-level operation in a :class:`PatchBundle`.
-
-    Operation semantics:
-      * ``create`` — file does not exist yet; ``content`` is written as-is.
-      * ``replace`` — overwrite an existing file with ``content``.
-      * ``edit`` — apply ``edits`` sequentially to the current file contents.
-      * ``delete`` — remove the file; no ``content`` or ``edits``.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(
@@ -95,8 +73,6 @@ class PatchFile(BaseModel):
 
 
 class PatchBundle(BaseModel):
-    """Batch of per-file operations produced by the codegen LLM."""
-
     model_config = ConfigDict(extra="forbid")
 
     files: list[PatchFile] = Field(

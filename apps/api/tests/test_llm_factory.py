@@ -6,8 +6,8 @@ import pytest
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
-from micracode_api.agents.llm import LLMFactory
 from micracode_api.config import get_settings
+from micracode_core.llm import LLMFactory
 
 
 def test_factory_builds_gemini_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

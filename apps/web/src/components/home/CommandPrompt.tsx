@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  BookOpen,
-  MoreHorizontal,
-  Plus,
-  UserRound,
-  Youtube,
-  Zap,
-  SendHorizontal
-} from "lucide-react";
+import { BookOpen, Plus, UserRound, Youtube, Zap, SendHorizontal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";

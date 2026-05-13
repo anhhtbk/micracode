@@ -1,16 +1,6 @@
 "use client";
 
-import {
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  Database,
-  Eye,
-  MoreHorizontal,
-  RefreshCw,
-  Share2,
-  Terminal,
-} from "lucide-react";
+import { Code2, Eye, RefreshCw } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -58,7 +48,7 @@ export function EditorTopBar({
   activeTab,
   onTabChange,
   urlText = "/",
-  onTerminalToggle,
+  onTerminalToggle: _onTerminalToggle,
   onRefresh,
 }: EditorTopBarProps) {
   return (

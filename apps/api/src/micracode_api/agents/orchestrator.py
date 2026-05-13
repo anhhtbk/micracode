@@ -212,17 +212,23 @@ async def _codegen(
     so the path works against OpenAI-compatible shims (Anthropic, OpenRouter,
     LM Studio) that don't reliably honor function-calling.
     """
-    schema_json = json.dumps(PatchBundle.model_json_schema(), indent=2)
     human = (
         f"{_render_context_block(context)}\n\n"
         f"User request:\n{prompt or '(empty)'}\n\n"
         f"Plan:\n{plan or '(none)'}\n\n"
-        "Respond with a single JSON object matching this PatchBundle schema "
-        "and nothing else (no prose, no markdown fences):\n"
-        f"{schema_json}\n\n"
-        "Use 'create' for new files, 'replace' to rewrite placeholder "
-        "scaffolds or short files wholesale, and 'edit' only for surgical "
-        "tweaks whose search strings appear verbatim in the file bodies above."
+        "Respond with a single JSON object and nothing else (no prose, no\n"
+        "markdown fences). Shape:\n"
+        '{\n'
+        '  "files": [\n'
+        '    {"path": "<relative posix path>", "operation": "create"|"replace", "content": "<full file body>"},\n'
+        '    {"path": "...", "operation": "edit", "edits": [{"search": "<exact substring>", "replace": "<new text>"}]},\n'
+        '    {"path": "...", "operation": "delete"}\n'
+        '  ]\n'
+        '}\n'
+        "Rules: 'create' for new files; 'replace' to rewrite placeholder\n"
+        "scaffolds or short files wholesale; 'edit' only when each 'search'\n"
+        "string appears verbatim and exactly once in the file body shown\n"
+        "above; 'delete' carries no content/edits. Max 10 files."
     )
 
     try:
@@ -341,9 +347,10 @@ async def run_codegen_stream(
         return
 
     yield MessageDeltaEvent(content=plan_text + "\n")
+    yield StatusEvent(stage="generating", note="Generating code")
 
-    try:
-        bundle = await _codegen(
+    codegen_task = asyncio.create_task(
+        _codegen(
             prompt,
             plan_text,
             history_msgs,
@@ -351,11 +358,26 @@ async def run_codegen_stream(
             provider=resolved_provider,
             model=resolved_model,
         )
+    )
+    # Heartbeat so proxies (Vercel/Cloudflare/nginx) don't drop the SSE
+    # connection while the upstream LLM is still composing its JSON reply.
+    elapsed = 0
+    try:
+        while not codegen_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(codegen_task), timeout=10)
+            except asyncio.TimeoutError:
+                elapsed += 10
+                yield StatusEvent(
+                    stage="generating", note=f"Still generating ({elapsed}s)"
+                )
+        bundle = codegen_task.result()
     except CodegenError as exc:
         logger.warning("codegen failed: %s", exc)
         yield ErrorEvent(message=str(exc), recoverable=False)
         return
     except asyncio.CancelledError:
+        codegen_task.cancel()
         raise
     except Exception as exc:
         logger.exception("codegen crashed")

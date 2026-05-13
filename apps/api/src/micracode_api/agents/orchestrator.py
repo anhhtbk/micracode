@@ -13,13 +13,16 @@ preserved here so router code and tests can keep importing them through
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from collections.abc import AsyncIterator
 
 import httpx
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from pydantic import ValidationError
 
 from ..config import get_settings
 from ..schemas.codegen import PatchBundle
@@ -164,6 +167,36 @@ async def _plan(
     return plan_text
 
 
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_object(text: str) -> str:
+    """Pull a JSON object out of an LLM response.
+
+    Handles three shapes: bare JSON, ```json fenced JSON, and prose with a
+    JSON object embedded. Needed because OpenAI-compatible shims for Claude
+    or local models often ignore tool-calling and return text instead, which
+    breaks ``with_structured_output``.
+    """
+    s = (text or "").strip()
+    if not s:
+        raise ValueError("empty model response")
+
+    if s.startswith("{") and s.endswith("}"):
+        return s
+
+    m = _JSON_FENCE_RE.search(s)
+    if m:
+        return m.group(1).strip()
+
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end > start:
+        return s[start : end + 1]
+
+    raise ValueError("no JSON object found in model response")
+
+
 async def _codegen(
     prompt: str,
     plan: str,
@@ -173,21 +206,28 @@ async def _codegen(
     provider: str,
     model: str,
 ) -> PatchBundle:
-    """Run the codegen LLM call with structured output."""
+    """Run the codegen LLM call and parse a PatchBundle from the response.
+
+    Uses plain JSON-output prompting rather than ``with_structured_output``
+    so the path works against OpenAI-compatible shims (Anthropic, OpenRouter,
+    LM Studio) that don't reliably honor function-calling.
+    """
+    schema_json = json.dumps(PatchBundle.model_json_schema(), indent=2)
     human = (
         f"{_render_context_block(context)}\n\n"
         f"User request:\n{prompt or '(empty)'}\n\n"
         f"Plan:\n{plan or '(none)'}\n\n"
-        "Respond with the PatchBundle schema only. Use 'create' for new "
-        "files, 'replace' to rewrite placeholder scaffolds or short files "
-        "wholesale, and 'edit' only for surgical tweaks whose search "
-        "strings appear verbatim in the file bodies above."
+        "Respond with a single JSON object matching this PatchBundle schema "
+        "and nothing else (no prose, no markdown fences):\n"
+        f"{schema_json}\n\n"
+        "Use 'create' for new files, 'replace' to rewrite placeholder "
+        "scaffolds or short files wholesale, and 'edit' only for surgical "
+        "tweaks whose search strings appear verbatim in the file bodies above."
     )
 
     try:
         llm = build_llm(provider, model)
-        structured = llm.with_structured_output(PatchBundle)
-        result = await structured.ainvoke(
+        msg = await llm.ainvoke(
             [
                 SystemMessage(content=CODEGEN_SYSTEM_PROMPT),
                 *history,
@@ -200,8 +240,15 @@ async def _codegen(
         logger.exception("codegen LLM call failed")
         raise CodegenError(f"codegen failed: {exc}") from exc
 
-    if not isinstance(result, PatchBundle):
-        raise CodegenError("codegen returned unexpected shape")
+    raw = msg.content if isinstance(msg.content, str) else ""
+    try:
+        payload = _extract_json_object(raw)
+        result = PatchBundle.model_validate_json(payload)
+    except (ValueError, json.JSONDecodeError, ValidationError) as exc:
+        snippet = (raw or "").strip()[:400]
+        logger.warning("codegen JSON parse failed: %s; raw=%r", exc, snippet)
+        raise CodegenError(f"codegen returned invalid JSON: {exc}") from exc
+
     if not result.files:
         raise CodegenError("codegen returned no file operations")
     return result

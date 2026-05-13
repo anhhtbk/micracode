@@ -32,12 +32,20 @@ def _pr(role: str, content: str, *, idx: int = 0) -> PromptRecord:
 
 
 def _make_mock_llm(plan_text: str, bundle: PatchBundle) -> MagicMock:
-    """Mock that returns ``plan_text`` on ainvoke and ``bundle`` via structured output."""
-    structured = MagicMock()
-    structured.ainvoke = AsyncMock(return_value=bundle)
+    """Mock LLM whose ``ainvoke`` returns plan text first, then bundle JSON.
+
+    The orchestrator parses JSON out of the second ``ainvoke`` response, so we
+    serialize ``bundle`` to its JSON form instead of relying on
+    ``with_structured_output`` (which the orchestrator no longer uses).
+    """
+    bundle_json = bundle.model_dump_json()
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=plan_text))
-    mock_llm.with_structured_output.return_value = structured
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            AIMessage(content=plan_text),
+            AIMessage(content=bundle_json),
+        ]
+    )
     return mock_llm
 
 
@@ -461,7 +469,8 @@ async def test_stream_threads_history_to_planner_and_codegen(
 
     # Both LLM calls received the system prompt, then the history turns, then
     # a HumanMessage with the current prompt.
-    planner_messages = mock_llm.ainvoke.await_args[0][0]
+    assert mock_llm.ainvoke.await_count == 2
+    planner_messages = mock_llm.ainvoke.await_args_list[0][0][0]
     assert isinstance(planner_messages[0], SystemMessage)
     assert [type(m).__name__ for m in planner_messages[1:3]] == [
         "HumanMessage",
@@ -472,8 +481,7 @@ async def test_stream_threads_history_to_planner_and_codegen(
     assert isinstance(planner_messages[-1], HumanMessage)
     assert "now do this" in planner_messages[-1].content
 
-    codegen_structured = mock_llm.with_structured_output.return_value
-    codegen_messages = codegen_structured.ainvoke.await_args[0][0]
+    codegen_messages = mock_llm.ainvoke.await_args_list[1][0][0]
     assert isinstance(codegen_messages[0], SystemMessage)
     assert [type(m).__name__ for m in codegen_messages[1:3]] == [
         "HumanMessage",

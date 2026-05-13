@@ -31,6 +31,12 @@ const nextConfig: NextConfig = {
     typedRoutes: true,
   },
   transpilePackages: ["@micracode/shared", "@webcontainer/api"],
+  // Lint and typecheck are run as separate CI / pre-commit jobs
+  // (`bun --filter web lint` / `typecheck`). Skipping them during
+  // `next build` keeps Docker image builds focused on compilation
+  // and avoids failing CI on stylistic ESLint rules.
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: false },
   ...(standaloneEnabled
     ? {
         output: "standalone" as const,

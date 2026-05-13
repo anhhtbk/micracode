@@ -52,13 +52,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Proxy /api/* to the backend via the docker-internal hostname. Keeps
-  // the API off the public internet — browsers only ever hit the web
-  // origin, this Node-side rewrite forwards into the docker network.
-  // INTERNAL_API_URL is server-only (no NEXT_PUBLIC_ prefix); defaults
-  // to http://api:8000 which matches the compose service name.
+  // Proxy /api/* to the backend Node-side. Keeps the API off the public
+  // internet — browsers only ever hit the web origin, this rewrite
+  // forwards into the backend.
+  //   - Local dev (`bun run dev`, no docker): defaults to localhost:8000
+  //     because the bare service name `api` doesn't resolve outside
+  //     docker DNS.
+  //   - Docker compose: docker-compose.yml sets
+  //     INTERNAL_API_URL=http://api:8000 to forward over the internal
+  //     network.
   async rewrites() {
-    const internal = process.env.INTERNAL_API_URL ?? "http://api:8000";
+    const internal = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
     return [{ source: "/api/:path*", destination: `${internal}/:path*` }];
   },
 };

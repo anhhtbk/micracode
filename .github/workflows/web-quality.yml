@@ -43,12 +43,22 @@ jobs:
       # Prove the ESLint config (apps/web/.eslintrc.json) is actually picked
       # up by the resolver before running the lint pass. Fails fast if the
       # workflow ever drifts away from the on-disk config.
+      # NOTE: ESLint v9 defaults to flat config; this repo still uses the
+      # legacy .eslintrc.json that `next lint` reads via the compat shim,
+      # so we set ESLINT_USE_FLAT_CONFIG=false for direct CLI invocations.
       - name: Verify ESLint config resolves
         working-directory: apps/web
-        run: bun x eslint --print-config src/app/page.tsx > /tmp/eslint-config.json && head -c 400 /tmp/eslint-config.json && echo
+        env:
+          ESLINT_USE_FLAT_CONFIG: "false"
+        run: |
+          bun x eslint --print-config src/app/page.tsx > /tmp/eslint-config.json
+          head -c 400 /tmp/eslint-config.json
+          echo
 
       - name: Lint web (strict)
         working-directory: apps/web
+        env:
+          ESLINT_USE_FLAT_CONFIG: "false"
         run: bun x next lint --max-warnings 0
 
       - name: Typecheck web + shared

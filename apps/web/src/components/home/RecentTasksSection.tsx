@@ -1,11 +1,25 @@
 "use client";
 
-import { ClipboardList, Globe2, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  ClipboardList,
+  ExternalLink,
+  Globe2,
+  Loader2,
+  RefreshCw,
+  Rocket,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { deleteProject, type ProjectRecord } from "@/lib/api/projects";
+import {
+  deleteProject,
+  promoteDeployment,
+  type DeploymentRecord,
+  type ProjectRecord,
+} from "@/lib/api/projects";
 import { cn } from "@/lib/utils";
 
 type Tab = "recent" | "deployed";
@@ -93,9 +107,9 @@ export function RecentTasksSection({
       ) : tab === "recent" ? (
         <RecentTable projects={projects} onChanged={() => router.refresh()} />
       ) : (
-        <EmptyState
-          title="No deployed apps yet"
-          description="Apps you deploy will show up here."
+        <DeployedAppsTable
+          projects={projects}
+          onChanged={() => router.refresh()}
         />
       )}
     </section>
@@ -123,8 +137,11 @@ function RecentTable({
 
   async function handleDelete(p: ProjectRecord) {
     if (pendingId) return;
+    const vercelWarning = p.vercel_project_name
+      ? `\n\nThis will also delete the Vercel project "${p.vercel_project_name}" and take its production URL offline.`
+      : "";
     const ok = window.confirm(
-      `Delete project "${p.name}"? This will permanently remove its files and history.`,
+      `Delete project "${p.name}"? This will permanently remove its files and history.${vercelWarning}`,
     );
     if (!ok) return;
     setPendingId(p.id);
@@ -219,6 +236,152 @@ function RelativeTime({ iso, className }: { iso: string; className?: string }) {
     <span className={className} suppressHydrationWarning>
       {text}
     </span>
+  );
+}
+
+function DeployedAppsTable({
+  projects,
+  onChanged,
+}: {
+  projects: ProjectRecord[];
+  onChanged: () => void;
+}) {
+  const deployed = projects.filter(
+    (p) => (p.deployments?.length ?? 0) > 0,
+  );
+  if (deployed.length === 0) {
+    return (
+      <EmptyState
+        title="No deployed apps yet"
+        description="Deploy a project to Vercel and its versions will show up here."
+      />
+    );
+  }
+  return (
+    <ul className="mt-2 flex flex-col gap-3">
+      {deployed.map((p) => (
+        <DeployedProjectCard key={p.id} project={p} onChanged={onChanged} />
+      ))}
+    </ul>
+  );
+}
+
+function DeployedProjectCard({
+  project,
+  onChanged,
+}: {
+  project: ProjectRecord;
+  onChanged: () => void;
+}) {
+  const deployments = [...(project.deployments ?? [])].reverse();
+  const current = deployments.find((d) => d.is_current_production);
+  // Only show the stable alias when Vercel actually returned one — never
+  // synthesise it from project name (Vercel may append a suffix).
+  const aliasUrl = current?.alias_url || null;
+
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function handlePromote(d: DeploymentRecord) {
+    if (pendingId || d.is_current_production) return;
+    setPendingId(d.id);
+    setErrorMsg(null);
+    try {
+      await promoteDeployment(project.id, d.id);
+      onChanged();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Promote failed");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  return (
+    <li className="rounded-xl border border-[#1b1b1e] bg-[#0f0f11] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col">
+          <Link
+            href={`/projects/${project.id}`}
+            className="truncate text-sm font-medium text-white hover:underline"
+          >
+            {project.name}
+          </Link>
+          {aliasUrl ? (
+            <a
+              href={aliasUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex w-fit items-center gap-1 text-xs text-zinc-400 hover:text-white"
+            >
+              {aliasUrl.replace(/^https?:\/\//, "")}
+              <ExternalLink className="size-3" />
+            </a>
+          ) : null}
+        </div>
+        <span className="shrink-0 text-[10px] uppercase tracking-wider text-zinc-500">
+          {deployments.length} version{deployments.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {errorMsg ? (
+        <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          {errorMsg}
+        </div>
+      ) : null}
+
+      <ul className="mt-3 flex flex-col divide-y divide-[#1b1b1e] border-t border-[#1b1b1e]">
+        {deployments.map((d) => {
+          const isBusy = pendingId === d.id;
+          return (
+            <li
+              key={d.id}
+              className="grid grid-cols-[1fr_auto_auto] items-center gap-3 py-2 text-xs"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                {d.is_current_production ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                    <CheckCircle2 className="size-3" />
+                    Production
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
+                    {d.target}
+                  </span>
+                )}
+                <a
+                  href={d.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="truncate font-mono text-zinc-300 hover:text-white"
+                  title={d.url}
+                >
+                  {d.url.replace(/^https?:\/\//, "")}
+                </a>
+              </div>
+              <RelativeTime iso={d.created_at} className="text-zinc-500" />
+              <div className="flex items-center gap-1">
+                {!d.is_current_production && d.target === "production" ? (
+                  <button
+                    type="button"
+                    onClick={() => void handlePromote(d)}
+                    disabled={isBusy || pendingId !== null}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-700 px-2 text-[11px] text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-50"
+                    title="Promote this version to production"
+                  >
+                    {isBusy ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Rocket className="size-3" />
+                    )}
+                    Promote
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </li>
   );
 }
 

@@ -78,6 +78,17 @@ async def get_project(project_id: SlugPath, storage: StorageDep) -> ProjectRecor
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: SlugPath, storage: StorageDep) -> Response:
+    # If the project was ever deployed, tear it down on Vercel first.
+    # We deliberately do NOT delete locally when the remote call fails:
+    # the user would lose the mapping needed to retry, leaving an
+    # orphan project on Vercel with no way to clean it up from the UI.
+    record = storage.get_project(project_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    if record.vercel_project_name:
+        from .deploy import delete_vercel_project
+
+        await delete_vercel_project(record.vercel_project_name)
     if not storage.delete_project(project_id):
         raise HTTPException(status_code=404, detail="project not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import base64
 import os
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path
@@ -20,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..deps import StorageDep
+from ..schemas.project import DeploymentRecord, ProjectRecord
 from ..storage import SLUG_RE, iter_ignored_top_level
 
 router = APIRouter(prefix="/projects")
@@ -50,13 +52,13 @@ def _is_secret_like(name: str) -> bool:
 
 
 class VercelDeployRequest(BaseModel):
-    name: str | None = Field(default=None, description="Override deployment name.")
-    target: str | None = Field(default="production", description="'production' or 'preview'.")
+    target: Literal["production", "preview"] = Field(default="production")
 
 
 class VercelDeployResponse(BaseModel):
     id: str
     url: str
+    alias_url: str | None = None
     inspector_url: str | None = None
 
 
@@ -106,21 +108,61 @@ def _collect_files(proj_dir: str) -> list[dict[str, str]]:
     return files
 
 
-@router.post("/{project_id}/deploy/vercel", response_model=VercelDeployResponse)
-async def deploy_to_vercel(
-    project_id: SlugPath,
-    body: VercelDeployRequest,
-    storage: StorageDep,
-) -> VercelDeployResponse:
+def _require_token() -> str:
     token = settings.vercel_token.strip()
     if not token:
         raise HTTPException(
             status_code=503,
             detail="VERCEL_TOKEN is not configured on the API server",
         )
+    return token
 
-    if storage.get_project(project_id) is None:
+
+def _vercel_params() -> dict[str, str] | None:
+    team_id = settings.vercel_team_id.strip()
+    return {"teamId": team_id} if team_id else None
+
+
+def _full_url(raw: str) -> str:
+    if not raw:
+        return ""
+    return raw if raw.startswith("http") else f"https://{raw}"
+
+
+def _pick_production_alias(data: dict[str, object]) -> str | None:
+    """Extract the stable production alias from a Vercel deploy response.
+
+    Vercel returns ``alias: list[str]`` with every alias that will be
+    attached to the deployment (project-wide ``{name}.vercel.app``,
+    custom domains, etc.). Shortest entry is the cleanest project alias;
+    we cannot synthesise it ourselves because Vercel appends a
+    disambiguating suffix when the bare name is already taken.
+    """
+    raw = data.get("alias")
+    if not isinstance(raw, list):
+        return None
+    candidates = [a for a in raw if isinstance(a, str) and a]
+    if not candidates:
+        return None
+    candidates.sort(key=len)
+    return _full_url(candidates[0])
+
+
+@router.post("/{project_id}/deploy/vercel", response_model=VercelDeployResponse)
+async def deploy_to_vercel(
+    project_id: SlugPath,
+    body: VercelDeployRequest,
+    storage: StorageDep,
+) -> VercelDeployResponse:
+    token = _require_token()
+    project = storage.get_project(project_id)
+    if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+
+    # Pin the Vercel project name on first deploy and reuse it forever
+    # after — that's what keeps the production alias stable across
+    # versions.
+    vercel_name = project.vercel_project_name or project_id
 
     proj_dir = str(storage.project_dir(project_id))
     files = _collect_files(proj_dir)
@@ -128,14 +170,11 @@ async def deploy_to_vercel(
         raise HTTPException(status_code=400, detail="project has no files to deploy")
 
     payload = {
-        "name": (body.name or project_id),
+        "name": vercel_name,
         "files": files,
         "projectSettings": {"framework": "nextjs"},
-        "target": body.target or "production",
+        "target": body.target,
     }
-
-    team_id = settings.vercel_team_id.strip()
-    params = {"teamId": team_id} if team_id else None
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -144,7 +183,9 @@ async def deploy_to_vercel(
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
-            res = await client.post(VERCEL_API, json=payload, headers=headers, params=params)
+            res = await client.post(
+                VERCEL_API, json=payload, headers=headers, params=_vercel_params()
+            )
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"vercel request failed: {exc}") from exc
 
@@ -156,9 +197,99 @@ async def deploy_to_vercel(
         raise HTTPException(status_code=res.status_code, detail=f"vercel: {err}")
 
     data = res.json()
-    url = data.get("url") or ""
-    return VercelDeployResponse(
+    permalink = _full_url(data.get("url") or "")
+    alias_url = _pick_production_alias(data) if body.target == "production" else None
+
+    record = DeploymentRecord(
         id=data.get("id", ""),
-        url=f"https://{url}" if url and not url.startswith("http") else url,
+        url=permalink,
+        alias_url=alias_url,
+        target=body.target,
+        created_at=datetime.now(UTC),
+        is_current_production=(body.target == "production"),
+    )
+    storage.add_deployment(project_id, record, vercel_project_name=vercel_name)
+
+    return VercelDeployResponse(
+        id=record.id,
+        url=record.url,
+        alias_url=alias_url,
         inspector_url=data.get("inspectorUrl"),
     )
+
+
+class PromoteResponse(BaseModel):
+    ok: bool
+    project: ProjectRecord
+
+
+@router.post(
+    "/{project_id}/deployments/{deployment_id}/promote",
+    response_model=PromoteResponse,
+)
+async def promote_deployment(
+    project_id: SlugPath,
+    deployment_id: str,
+    storage: StorageDep,
+) -> PromoteResponse:
+    """Point the production alias at a previously created deployment.
+
+    Vercel keeps every deployment online forever; promoting just shifts
+    the shared ``{name}.vercel.app`` alias. Cheap, instant, no rebuild.
+    """
+    token = _require_token()
+    project = storage.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    if not project.vercel_project_name:
+        raise HTTPException(status_code=400, detail="project has not been deployed yet")
+    if not any(d.id == deployment_id for d in project.deployments):
+        raise HTTPException(status_code=404, detail="deployment not found")
+
+    headers = {"Authorization": f"Bearer {token}"}
+    url = (
+        f"https://api.vercel.com/v10/projects/"
+        f"{project.vercel_project_name}/promote/{deployment_id}"
+    )
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            res = await client.post(url, headers=headers, params=_vercel_params())
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"vercel request failed: {exc}") from exc
+
+    # Vercel returns 201 on success; some endpoints return 200.
+    if res.status_code >= 400:
+        try:
+            err = res.json().get("error", {}).get("message") or res.text
+        except ValueError:
+            err = res.text
+        raise HTTPException(status_code=res.status_code, detail=f"vercel: {err}")
+
+    try:
+        updated = storage.set_current_production(project_id, deployment_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="deployment not found") from exc
+
+    return PromoteResponse(ok=True, project=updated)
+
+
+async def delete_vercel_project(project_name: str) -> None:
+    """Delete a project on Vercel. Idempotent — 404 is treated as success."""
+    token = _require_token()
+    url = f"https://api.vercel.com/v9/projects/{project_name}"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            res = await client.delete(url, headers=headers, params=_vercel_params())
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"vercel request failed: {exc}"
+            ) from exc
+    if res.status_code == 404:
+        return
+    if res.status_code >= 400:
+        try:
+            err = res.json().get("error", {}).get("message") or res.text
+        except ValueError:
+            err = res.text
+        raise HTTPException(status_code=res.status_code, detail=f"vercel: {err}")

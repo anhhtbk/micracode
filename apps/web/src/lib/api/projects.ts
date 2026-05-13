@@ -12,12 +12,23 @@ import { env } from "@/lib/env";
 
 export type PromptRole = "user" | "assistant" | "system" | "tool";
 
+export interface DeploymentRecord {
+  id: string;
+  url: string;
+  alias_url?: string | null;
+  target: "production" | "preview";
+  created_at: string;
+  is_current_production: boolean;
+}
+
 export interface ProjectRecord {
   id: string;
   name: string;
   template: string;
   created_at: string;
   updated_at: string;
+  vercel_project_name?: string | null;
+  deployments?: DeploymentRecord[];
 }
 
 export interface CreateProjectBody {
@@ -210,13 +221,13 @@ export async function restoreSnapshot(
 }
 
 export interface VercelDeployBody {
-  name?: string;
   target?: "production" | "preview";
 }
 
 export interface VercelDeployResult {
   id: string;
   url: string;
+  alias_url?: string | null;
   inspector_url?: string | null;
 }
 
@@ -228,6 +239,23 @@ export function deployToVercel(
   return request<VercelDeployResult>(
     `/v1/projects/${encodeURIComponent(id)}/deploy/vercel`,
     { method: "POST", body: JSON.stringify(body) },
+    opts,
+  );
+}
+
+export interface PromoteResult {
+  ok: boolean;
+  project: ProjectRecord;
+}
+
+export function promoteDeployment(
+  id: string,
+  deploymentId: string,
+  opts?: ApiClientOptions,
+): Promise<PromoteResult> {
+  return request<PromoteResult>(
+    `/v1/projects/${encodeURIComponent(id)}/deployments/${encodeURIComponent(deploymentId)}/promote`,
+    { method: "POST" },
     opts,
   );
 }

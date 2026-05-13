@@ -31,7 +31,13 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from .config import get_settings
-from .schemas.project import ProjectRecord, PromptRecord, PromptRole, SnapshotRecord
+from .schemas.project import (
+    DeploymentRecord,
+    ProjectRecord,
+    PromptRecord,
+    PromptRole,
+    SnapshotRecord,
+)
 from .starter.next_default import NEXT_STARTER_FILES
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -619,6 +625,63 @@ class Storage:
                 self.delete_snapshot(slug, rec.id)
             except Exception:  # noqa: BLE001 - pruning is best-effort
                 continue
+
+    # -- deployments --------------------------------------------------------
+
+    def add_deployment(
+        self,
+        slug: str,
+        deployment: DeploymentRecord,
+        *,
+        vercel_project_name: str,
+    ) -> ProjectRecord:
+        """Persist a new Vercel deployment onto the project record.
+
+        Also pins ``vercel_project_name`` (first deploy only) and, when the
+        new deployment targets production, clears ``is_current_production``
+        on every prior row so only the latest production deploy carries
+        the flag.
+        """
+        rec = self._try_read_project_json(slug)
+        if rec is None:
+            raise FileNotFoundError(slug)
+        existing = list(rec.deployments)
+        if deployment.target == "production":
+            existing = [
+                d.model_copy(update={"is_current_production": False}) for d in existing
+            ]
+        existing.append(deployment)
+        updated = rec.model_copy(
+            update={
+                "vercel_project_name": rec.vercel_project_name or vercel_project_name,
+                "deployments": existing,
+                "updated_at": _now(),
+            }
+        )
+        self._write_project_json(slug, updated)
+        return updated
+
+    def set_current_production(self, slug: str, deployment_id: str) -> ProjectRecord:
+        """Mark a single deployment as the live production version.
+
+        Used after a successful Vercel promote: every other row drops
+        ``is_current_production``, the target row gets it set to True.
+        Raises ``LookupError`` if the id is unknown.
+        """
+        rec = self._try_read_project_json(slug)
+        if rec is None:
+            raise FileNotFoundError(slug)
+        if not any(d.id == deployment_id for d in rec.deployments):
+            raise LookupError(deployment_id)
+        new_deployments = [
+            d.model_copy(update={"is_current_production": d.id == deployment_id})
+            for d in rec.deployments
+        ]
+        updated = rec.model_copy(
+            update={"deployments": new_deployments, "updated_at": _now()}
+        )
+        self._write_project_json(slug, updated)
+        return updated
 
     # -- internals ----------------------------------------------------------
 

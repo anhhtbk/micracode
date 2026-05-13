@@ -59,15 +59,41 @@ def test_apply_patch_applies_ops_sequentially() -> None:
     assert result == "xxx yyy"
 
 
-def test_apply_patch_whitespace_significant() -> None:
-    # A search that includes different indentation than the file must fail:
-    # the buffer contains a line indented with two spaces, but the search
-    # uses four spaces, so the substring is absent.
+def test_apply_patch_indentation_significant() -> None:
+    # Indentation still must agree — line-trimmed fallback only forgives
+    # trailing whitespace, not leading. A search with extra leading
+    # indentation against a less-indented buffer is genuinely a miss.
     with pytest.raises(PatchError, match="not found"):
         apply_patch(
             "function f() {\n  return 1;\n}\n",
             [SearchReplace(search="    return 1;", replace="    return 2;")],
         )
+
+
+def test_apply_patch_trailing_whitespace_tolerated() -> None:
+    # Buffer has trailing spaces on an inner line; LLM-emitted search
+    # omits them. Exact match fails (the newline boundary doesn't line up),
+    # so the line-trimmed fallback should kick in.
+    result = apply_patch(
+        "let x = 1;   \nlet y = 2;\n",
+        [
+            SearchReplace(
+                search="let x = 1;\nlet y = 2;",
+                replace="let x = 10;\nlet y = 20;",
+            )
+        ],
+    )
+    assert result == "let x = 10;\nlet y = 20;\n"
+
+
+def test_apply_patch_crlf_normalized() -> None:
+    # Buffer uses CRLF line endings; LLM emits LF. The CRLF fallback
+    # should normalize both sides and apply the edit.
+    result = apply_patch(
+        "line1\r\nline2\r\nline3\r\n",
+        [SearchReplace(search="line2\n", replace="LINE2\n")],
+    )
+    assert result == "line1\nLINE2\nline3\n"
 
 
 # ---------------------------------------------------------------------------

@@ -171,26 +171,105 @@ def _path_is_safe(rel: str) -> bool:
     return True
 
 
+def _line_trimmed_match(buffer: str, search: str) -> tuple[int, int] | None:
+    """Find ``search`` in ``buffer`` ignoring per-line trailing whitespace.
+
+    Splits both sides into lines, compares each line with ``rstrip()``.
+    Returns ``(start, end)`` byte offsets in ``buffer`` if exactly one
+    contiguous block of buffer lines matches the sequence of search
+    lines; otherwise ``None``.
+
+    This is the conservative Aider-style fuzzy match: indentation must
+    still agree (no leading-whitespace stripping), but stray trailing
+    spaces or CR characters from the model won't break the edit.
+    """
+    buf_lines = buffer.splitlines(keepends=True)
+    raw_search_lines = search.splitlines(keepends=True)
+    if not raw_search_lines:
+        return None
+
+    search_norm = [ln.rstrip() for ln in raw_search_lines]
+    n = len(search_norm)
+
+    matches: list[int] = []
+    for i in range(len(buf_lines) - n + 1):
+        if all(buf_lines[i + j].rstrip() == search_norm[j] for j in range(n)):
+            matches.append(i)
+            if len(matches) > 1:
+                return None
+    if len(matches) != 1:
+        return None
+
+    start_line = matches[0]
+    start = sum(len(buf_lines[k]) for k in range(start_line))
+    end = start + sum(len(buf_lines[start_line + k]) for k in range(n))
+
+    # If the search didn't end with a newline, the model intended to
+    # match up to (but not including) the last line's terminator. Keep
+    # that newline outside the replaced span so the file ending stays.
+    last_search_line = raw_search_lines[-1]
+    last_buf_line = buf_lines[start_line + n - 1]
+    if not last_search_line.endswith(("\n", "\r")) and last_buf_line.endswith("\n"):
+        trailing = 2 if last_buf_line.endswith("\r\n") else 1
+        end -= trailing
+    return start, end
+
+
+def _apply_one_op(buffer: str, op: SearchReplace, idx: int) -> str:
+    """Apply one search/replace, with CRLF + line-trimmed fallbacks.
+
+    Strategy, in order: exact match (the contract); CRLF-normalized exact
+    match (LLMs sometimes emit ``\\n`` against a ``\\r\\n`` buffer or vice
+    versa); line-trimmed match (per-line ``rstrip``). Any fallback that
+    succeeds with exactly one match is accepted; otherwise raise.
+    """
+    count = buffer.count(op.search)
+    if count == 1:
+        return buffer.replace(op.search, op.replace, 1)
+    if count > 1:
+        raise PatchError(
+            f"edit #{idx + 1}: search string matches {count} times, expected 1"
+        )
+
+    # CRLF normalization fallback (both directions).
+    nl_buffer = buffer.replace("\r\n", "\n")
+    nl_search = op.search.replace("\r\n", "\n")
+    if op.search != nl_search or buffer != nl_buffer:
+        nl_count = nl_buffer.count(nl_search)
+        if nl_count == 1:
+            nl_replace = op.replace.replace("\r\n", "\n")
+            return nl_buffer.replace(nl_search, nl_replace, 1)
+        if nl_count > 1:
+            raise PatchError(
+                f"edit #{idx + 1}: search string matches {nl_count} times "
+                "after CRLF normalization, expected 1"
+            )
+
+    # Line-trimmed fallback (operates on the normalized buffer so a
+    # successful replace returns LF-only text — consistent with the
+    # CRLF branch above).
+    span = _line_trimmed_match(nl_buffer, nl_search)
+    if span is not None:
+        start, end = span
+        nl_replace = op.replace.replace("\r\n", "\n")
+        return nl_buffer[:start] + nl_replace + nl_buffer[end:]
+
+    raise PatchError(f"edit #{idx + 1}: search string not found in file")
+
+
 def apply_patch(original: str, ops: list[SearchReplace]) -> str:
     """Apply ``ops`` sequentially to ``original``.
 
-    Each op's ``search`` must occur exactly once in the *current* buffer
-    (i.e. after previous ops in the same list were applied). On 0 or >1
-    matches, :class:`PatchError` is raised and the caller should skip the
-    whole file — partial edits are worse than no edits for the agent.
+    Each op's ``search`` should occur exactly once in the *current* buffer
+    (i.e. after previous ops in the same list were applied). Exact match
+    is tried first; if it fails we try CRLF normalization and a
+    per-line-trimmed match. On 0 or >1 matches after all fallbacks,
+    :class:`PatchError` is raised and the caller should skip the whole
+    file — partial edits are worse than no edits for the agent.
     """
     buffer = original
     for idx, op in enumerate(ops):
-        count = buffer.count(op.search)
-        if count == 0:
-            raise PatchError(
-                f"edit #{idx + 1}: search string not found in file"
-            )
-        if count > 1:
-            raise PatchError(
-                f"edit #{idx + 1}: search string matches {count} times, expected 1"
-            )
-        buffer = buffer.replace(op.search, op.replace, 1)
+        buffer = _apply_one_op(buffer, op, idx)
     return buffer
 
 

@@ -260,6 +260,72 @@ async def _codegen(
     return result
 
 
+async def _repair_edits(
+    failed_paths: list[tuple[str, str]],
+    *,
+    context: ProjectContext,
+    user_prompt: str,
+    plan: str,
+    history: list[BaseMessage],
+    provider: str,
+    model: str,
+) -> PatchBundle | None:
+    """Ask the codegen LLM to redo just the files whose edits failed.
+
+    ``failed_paths`` is a list of ``(path, error_message)``. The repair
+    prompt steers the model toward whole-file ``replace`` ops (and away
+    from another round of search/replace, which is what just failed).
+    Returns ``None`` if the LLM call or JSON parse fails — callers should
+    fall back to surfacing the original errors.
+    """
+    if not failed_paths:
+        return None
+
+    file_blocks: list[str] = []
+    for path, err in failed_paths:
+        body = context.get_file(path) or ""
+        display = body
+        if len(display) > CONTEXT_FILE_DISPLAY_CAP:
+            display = display[:CONTEXT_FILE_DISPLAY_CAP] + "\n/* ... truncated ... */"
+        file_blocks.append(
+            f"----- {path} -----\nFailure: {err}\nCurrent file body:\n{display}"
+        )
+
+    human = (
+        "Your previous patch had failed edits. Redo ONLY the files below.\n"
+        "Prefer the `replace` operation (full file body) over another\n"
+        "round of search/replace. Do not touch any other files.\n\n"
+        f"Original request:\n{user_prompt or '(empty)'}\n\n"
+        f"Plan:\n{plan or '(none)'}\n\n"
+        + "\n\n".join(file_blocks)
+        + "\n\nRespond with a single JSON object: "
+        '{"files":[{"path":"...","operation":"replace","content":"..."}]}'
+    )
+
+    try:
+        llm = build_llm(provider, model)
+        msg = await llm.ainvoke(
+            [
+                SystemMessage(content=CODEGEN_SYSTEM_PROMPT),
+                *history,
+                HumanMessage(content=human),
+            ]
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("repair LLM call failed")
+        return None
+
+    raw = msg.content if isinstance(msg.content, str) else ""
+    try:
+        payload = _extract_json_object(raw)
+        return PatchBundle.model_validate_json(payload)
+    except (ValueError, json.JSONDecodeError, ValidationError) as exc:
+        logger.warning("repair JSON parse failed: %s", exc)
+        return None
+
+
 async def run_codegen_stream(
     *,
     project_id: str,
@@ -397,7 +463,38 @@ async def run_codegen_stream(
 
     yield StatusEvent(stage="generating", note="Writing files", snapshot_id=snapshot_id)
 
-    for result in apply_bundle(bundle, context):
+    results = apply_bundle(bundle, context)
+
+    # If any `edit` ops failed (typically because the model produced a
+    # search string that no longer matches the buffer), give the LLM one
+    # chance to redo just those files with a `replace` op. The fuzzy
+    # fallback in apply_patch catches the easy cases; this catches the
+    # harder ones where the model genuinely got the surrounding text wrong.
+    edit_targets = {f.path.strip().replace("\\", "/").lstrip("/"): f for f in bundle.files if f.operation == "edit"}
+    failed_edits = [
+        (r.path, r.error) for r in results
+        if r.kind == "error" and r.path in edit_targets
+    ]
+    if failed_edits:
+        yield StatusEvent(stage="generating", note=f"Repairing {len(failed_edits)} file(s)")
+        repaired = await _repair_edits(
+            failed_edits,
+            context=context,
+            user_prompt=prompt,
+            plan=plan_text,
+            history=history_msgs,
+            provider=resolved_provider,
+            model=resolved_model,
+        )
+        if repaired is not None:
+            repair_results = apply_bundle(repaired, context)
+            repair_by_path = {r.path: r for r in repair_results}
+            results = [
+                repair_by_path.get(r.path, r) if r.kind == "error" else r
+                for r in results
+            ]
+
+    for result in results:
         if result.kind == "error":
             yield ErrorEvent(
                 message=f"{result.path}: {result.error}",

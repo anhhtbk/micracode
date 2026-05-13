@@ -1,0 +1,91 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ghcr.io/${GITHUB_OWNER:-your-github-username}/micracode-api:${TAG:-latest}
+    # Always try to pull the GHCR image on `up`. To build locally instead,
+    # run `docker compose build api && docker compose up --pull never -d api`.
+    pull_policy: always
+    container_name: micracode-api
+    restart: unless-stopped
+    env_file:
+      # Optional so pull-only users (consuming GHCR image) can start the
+      # stack before creating the file. The API will fall back to its own
+      # defaults / runtime errors if required keys are missing.
+      - path: ./apps/api/.env
+        required: false
+    environment:
+      OPENER_APPS_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - api-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # Standalone (default) produces a slim runtime image; switch to
+      # `runner-full` to fall back to copying full node_modules.
+      target: ${WEB_BUILD_TARGET:-runner-standalone}
+      args:
+        NEXT_STANDALONE: ${NEXT_STANDALONE:-true}
+        # NEXT_PUBLIC_* vars are inlined at build time, so they must be
+        # passed as build args (runtime `environment:` has no effect).
+        # NEXT_PUBLIC_* is inlined at build time. Empty default keeps
+        # `docker compose pull` / `up` working when consuming the prebuilt
+        # GHCR image (where the URL is already baked in). When building
+        # locally you MUST export NEXT_PUBLIC_API_BASE_URL in `.env` (e.g.
+        # http://localhost:8000 for local, https://api.example.com for prod)
+        # — otherwise the client bundle will fetch from an empty origin.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+    image: ghcr.io/${GITHUB_OWNER:-your-github-username}/micracode-web:${TAG:-latest}
+    # Always try to pull the GHCR image on `up`. To build locally instead,
+    # run `docker compose build web && docker compose up --pull never -d web`.
+    pull_policy: always
+    container_name: micracode-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  # Cloudflare Tunnel: expose web (and optionally api) through a Cloudflare
+  # domain without opening any public port. Tunnel routes are configured in
+  # the Cloudflare Zero Trust dashboard (Networks → Tunnels) — no config
+  # file required here.
+  #
+  # Token setup:
+  #   1. https://one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel
+  #   2. Pick the "Cloudflared" connector, give the tunnel a name
+  #   3. Copy the token (long string starting with `eyJ...`) into .env as
+  #      CLOUDFLARE_TUNNEL_TOKEN=...
+  #   4. Public hostnames: map subdomain → service (e.g. app.example.com →
+  #      http://web:3000, api.example.com → http://api:8000). Use the
+  #      compose service name as host because they share the same network.
+  cloudflared:
+    # Optional service. Enable with: `docker compose --profile tunnel up`.
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:latest
+    container_name: micracode-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Empty default so compose can parse the file when the tunnel profile
+      # is not active. When the service IS started via `--profile tunnel`,
+      # cloudflared itself will refuse to run with an empty token.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - web
+      - api
+
+volumes:
+  api-data:

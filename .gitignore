@@ -61,3 +61,4 @@ yarn-error.log*
 # Turborepo / caches
 .turbo/
 .cache/
+docs/

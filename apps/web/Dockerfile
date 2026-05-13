@@ -41,6 +41,10 @@ RUN bun install --frozen-lockfile 2>/dev/null || bun install
 # Now copy the rest of the sources and build.
 COPY . .
 
+# `apps/web/public/` may not exist in the repo yet — create it so the
+# runner-standalone stage's COPY of `apps/web/public` always succeeds.
+RUN mkdir -p apps/web/public
+
 RUN cd apps/web && bun run build
 
 ############################

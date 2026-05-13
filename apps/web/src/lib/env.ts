@@ -15,10 +15,12 @@ const isServer = typeof window === "undefined";
 
 function resolveBaseUrl(): string {
   if (isServer) {
+    // 127.0.0.1 (not "localhost") so Node 18+ doesn't resolve to ::1
+    // while the dev uvicorn binds 127.0.0.1.
     return (
       process.env.INTERNAL_API_URL ??
       process.env.NEXT_PUBLIC_API_BASE_URL ??
-      "http://localhost:8000"
+      "http://127.0.0.1:8000"
     );
   }
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";

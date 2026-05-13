@@ -55,14 +55,15 @@ const nextConfig: NextConfig = {
   // Proxy /api/* to the backend Node-side. Keeps the API off the public
   // internet — browsers only ever hit the web origin, this rewrite
   // forwards into the backend.
-  //   - Local dev (`bun run dev`, no docker): defaults to localhost:8000
-  //     because the bare service name `api` doesn't resolve outside
-  //     docker DNS.
+  //   - Local dev (`bun run dev`, no docker): defaults to 127.0.0.1:8000.
+  //     `localhost` is avoided because Node 18+ resolves it to ::1 (IPv6)
+  //     first, while the dev uvicorn script binds 127.0.0.1 (IPv4) →
+  //     ECONNREFUSED.
   //   - Docker compose: docker-compose.yml sets
   //     INTERNAL_API_URL=http://api:8000 to forward over the internal
   //     network.
   async rewrites() {
-    const internal = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
+    const internal = process.env.INTERNAL_API_URL ?? "http://127.0.0.1:8000";
     return [{ source: "/api/:path*", destination: `${internal}/:path*` }];
   },
 };

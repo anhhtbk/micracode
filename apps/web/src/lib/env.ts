@@ -26,8 +26,14 @@ function resolveBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 }
 
+// Use a getter so the value resolves on every access (some Next.js
+// startup paths import this module before container env is fully
+// applied; caching a const at module-load time would freeze the wrong
+// value forever).
 export const env = {
-  API_BASE_URL: resolveBaseUrl(),
+  get API_BASE_URL(): string {
+    return resolveBaseUrl();
+  },
 } as const;
 
 export type Env = typeof env;

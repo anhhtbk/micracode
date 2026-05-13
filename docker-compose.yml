@@ -46,6 +46,10 @@ services:
         # server-side. Override only if you intentionally want the
         # browser to hit the API directly (e.g. exposing api.* publicly).
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+        # Next.js bakes rewrite destinations at build time, so this
+        # must be a build arg (not just a runtime env). `api` is the
+        # docker compose service name.
+        INTERNAL_API_URL: ${INTERNAL_API_URL:-http://api:8000}
     image: ghcr.io/${GITHUB_OWNER:-your-github-username}/micracode-web:${TAG:-latest}
     # Always try to pull the GHCR image on `up`. To build locally instead,
     # run `docker compose build web && docker compose up --pull never -d web`.

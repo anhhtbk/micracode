@@ -27,8 +27,14 @@ ARG NEXT_STANDALONE=true
 # network (see next.config.ts rewrites). Override only when intentionally
 # pointing the browser at a public API origin.
 ARG NEXT_PUBLIC_API_BASE_URL=/api
+# Rewrites destinations are baked into the standalone routes manifest
+# during `next build`, so INTERNAL_API_URL must be set at build time
+# (not just runtime). Default to the docker compose service name so the
+# published image works as-is with the bundled compose file.
+ARG INTERNAL_API_URL=http://api:8000
 ENV NEXT_STANDALONE=${NEXT_STANDALONE} \
     NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
+    INTERNAL_API_URL=${INTERNAL_API_URL} \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production
 

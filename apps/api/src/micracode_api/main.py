@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from . import storage
 from .config import settings
-from .routers import generate, health, models, projects
+from .routers import deploy, generate, health, models, projects
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -47,7 +47,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept"],
         expose_headers=["X-Request-ID"],
         max_age=3600,
@@ -57,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router, prefix="/v1", tags=["models"])
     app.include_router(projects.router, prefix="/v1", tags=["projects"])
     app.include_router(generate.router, prefix="/v1", tags=["generate"])
+    app.include_router(deploy.router, prefix="/v1", tags=["deploy"])
 
     @app.exception_handler(Exception)
     async def _unhandled(_: Request, exc: Exception) -> JSONResponse:

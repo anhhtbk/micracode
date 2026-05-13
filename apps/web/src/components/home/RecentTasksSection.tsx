@@ -1,11 +1,11 @@
 "use client";
 
-import { ClipboardList, Globe2, MoreHorizontal, RefreshCw } from "lucide-react";
+import { ClipboardList, Globe2, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import type { ProjectRecord } from "@/lib/api/projects";
+import { deleteProject, type ProjectRecord } from "@/lib/api/projects";
 import { cn } from "@/lib/utils";
 
 type Tab = "recent" | "deployed";
@@ -91,7 +91,7 @@ export function RecentTasksSection({
           {error}
         </div>
       ) : tab === "recent" ? (
-        <RecentTable projects={projects} />
+        <RecentTable projects={projects} onChanged={() => router.refresh()} />
       ) : (
         <EmptyState
           title="No deployed apps yet"
@@ -102,7 +102,16 @@ export function RecentTasksSection({
   );
 }
 
-function RecentTable({ projects }: { projects: ProjectRecord[] }) {
+function RecentTable({
+  projects,
+  onChanged,
+}: {
+  projects: ProjectRecord[];
+  onChanged: () => void;
+}) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   if (projects.length === 0) {
     return (
       <EmptyState
@@ -112,8 +121,33 @@ function RecentTable({ projects }: { projects: ProjectRecord[] }) {
     );
   }
 
+  async function handleDelete(p: ProjectRecord) {
+    if (pendingId) return;
+    const ok = window.confirm(
+      `Delete project "${p.name}"? This will permanently remove its files and history.`,
+    );
+    if (!ok) return;
+    setPendingId(p.id);
+    setErrorMsg(null);
+    try {
+      await deleteProject(p.id);
+      onChanged();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Failed to delete project",
+      );
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   return (
     <div className="mt-2">
+      {errorMsg ? (
+        <div className="mb-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          {errorMsg}
+        </div>
+      ) : null}
       <div className="grid grid-cols-[140px_1fr_200px_40px] items-center gap-4 border-b border-[#1b1b1e] px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
         <span>ID</span>
         <span>Task</span>
@@ -121,39 +155,54 @@ function RecentTable({ projects }: { projects: ProjectRecord[] }) {
         <span />
       </div>
       <ul className="flex flex-col">
-        {projects.map((p) => (
-          <li key={p.id} className="group relative">
-            <Link
-              href={`/projects/${p.id}`}
-              className="grid grid-cols-[140px_1fr_200px_40px] items-center gap-4 rounded-md px-4 py-4 text-sm transition-all duration-200 ease-in-out hover:bg-[#1b1b1e]"
-            >
-              <span className="font-mono text-xs text-zinc-400">
-                {shortId(p.id)}
-              </span>
-              <span className="flex min-w-0 flex-col gap-1">
-                <span className="truncate font-medium text-white">{p.name}</span>
-                <span className="truncate text-xs text-zinc-500">
-                  {p.template || "Generated project"}
+        {projects.map((p) => {
+          const isDeleting = pendingId === p.id;
+          return (
+            <li key={p.id} className="group relative">
+              <Link
+                href={`/projects/${p.id}`}
+                className={cn(
+                  "grid grid-cols-[140px_1fr_200px_40px] items-center gap-4 rounded-md px-4 py-4 text-sm transition-all duration-200 ease-in-out hover:bg-[#1b1b1e]",
+                  isDeleting && "pointer-events-none opacity-50",
+                )}
+              >
+                <span className="font-mono text-xs text-zinc-400">
+                  {shortId(p.id)}
                 </span>
-              </span>
-              <RelativeTime
-                iso={p.updated_at}
-                className="text-sm text-zinc-400"
-              />
-              <span className="flex justify-end">
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label="More options"
-                  className="inline-flex size-8 items-center justify-center rounded-md text-zinc-500 transition-all duration-200 ease-in-out hover:bg-zinc-800 hover:text-white"
-                  onClick={(e) => e.preventDefault()}
-                >
-                  <MoreHorizontal className="size-4" />
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span className="truncate font-medium text-white">{p.name}</span>
+                  <span className="truncate text-xs text-zinc-500">
+                    {p.template || "Generated project"}
+                  </span>
                 </span>
-              </span>
-            </Link>
-          </li>
-        ))}
+                <RelativeTime
+                  iso={p.updated_at}
+                  className="text-sm text-zinc-400"
+                />
+                <span className="flex justify-end">
+                  <button
+                    type="button"
+                    aria-label={`Delete ${p.name}`}
+                    title="Delete project"
+                    disabled={isDeleting}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void handleDelete(p);
+                    }}
+                    className="inline-flex size-8 items-center justify-center rounded-md text-zinc-500 transition-all duration-200 ease-in-out hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </button>
+                </span>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

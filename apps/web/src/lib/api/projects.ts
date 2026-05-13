@@ -209,6 +209,29 @@ export async function restoreSnapshot(
   );
 }
 
+export interface VercelDeployBody {
+  name?: string;
+  target?: "production" | "preview";
+}
+
+export interface VercelDeployResult {
+  id: string;
+  url: string;
+  inspector_url?: string | null;
+}
+
+export function deployToVercel(
+  id: string,
+  body: VercelDeployBody = {},
+  opts?: ApiClientOptions,
+): Promise<VercelDeployResult> {
+  return request<VercelDeployResult>(
+    `/v1/projects/${encodeURIComponent(id)}/deploy/vercel`,
+    { method: "POST", body: JSON.stringify(body) },
+    opts,
+  );
+}
+
 export async function deleteSnapshot(
   id: string,
   snapshotId: string,

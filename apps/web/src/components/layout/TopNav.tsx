@@ -6,6 +6,8 @@ import Link from "next/link";
 import { getProjectDownloadUrl } from "@/lib/api/projects";
 import { cn } from "@/lib/utils";
 
+import { DeployVercelButton } from "./deploy-vercel-button";
+
 export interface TopNavProps {
   projectId: string;
   projectName?: string;
@@ -27,6 +29,7 @@ export function TopNav({ projectId, projectName: _projectName, onPublish }: TopN
       </div>
 
       <div className="flex items-center gap-2">
+        <DeployVercelButton projectId={projectId} />
         <a
           href={getProjectDownloadUrl(projectId)}
           download

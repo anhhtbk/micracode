@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # --- Local storage -----------------------------------------------------
     opener_apps_dir: Path = Field(default_factory=_default_data_dir)
 
+    # --- Deploy targets ----------------------------------------------------
+    vercel_token: str = Field(default="")
+    vercel_team_id: str = Field(default="")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

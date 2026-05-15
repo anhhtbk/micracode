@@ -8,6 +8,18 @@ import { CommandPrompt } from "@/components/home/CommandPrompt";
 import { createProject } from "@/lib/api/projects";
 import { cn } from "@/lib/utils";
 
+const NAME_MAX = 120;
+
+function deriveProjectName(prompt: string): string {
+  const firstLine = prompt.split(/\r?\n/)[0]?.trim() || prompt.trim();
+  const source = firstLine.length > 0 ? firstLine : prompt.trim();
+  if (source.length <= NAME_MAX) return source;
+  const sliced = source.slice(0, NAME_MAX - 1);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const cutoff = lastSpace > NAME_MAX * 0.6 ? sliced.slice(0, lastSpace) : sliced;
+  return `${cutoff.trimEnd()}…`;
+}
+
 export function HeroComposer({ className }: { className?: string }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
@@ -19,7 +31,8 @@ export function HeroComposer({ className }: { className?: string }) {
     if (!trimmed || isPending) return;
     setError(null);
     try {
-      const record = await createProject({ name: trimmed });
+      const name = deriveProjectName(trimmed);
+      const record = await createProject({ name });
       setPrompt("");
       const nextUrl =
         `/projects/${record.id}?prompt=${encodeURIComponent(trimmed)}` as Route;

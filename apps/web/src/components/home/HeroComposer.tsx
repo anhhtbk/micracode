@@ -22,7 +22,7 @@ export function HeroComposer({ className }: { className?: string }) {
       const record = await createProject({ name: trimmed });
       setPrompt("");
       const nextUrl =
-        `/projects/${record.id}?prompt=${encodeURIComponent(trimmed)}` as Route;
+        `/projects?id=${record.id}&prompt=${encodeURIComponent(trimmed)}` as Route;
       startTransition(() => {
         router.push(nextUrl);
         router.refresh();
@@ -49,7 +49,7 @@ export function HeroComposer({ className }: { className?: string }) {
           color: "transparent",
         }}
       >
-        <span className="block">Let's Build</span>
+        <span className="block">Let&apos;s Build</span>
         <span className="block">Something Cool</span>
       </h1>
       <style jsx>{`

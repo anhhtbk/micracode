@@ -2,12 +2,11 @@
 
 import {
   BookOpen,
-  MoreHorizontal,
   Plus,
   UserRound,
   Youtube,
   Zap,
-  SendHorizontal
+  SendHorizontal,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -60,9 +59,9 @@ export function CommandPrompt({
   onSubmit,
   placeholder = "Ask anything ...",
   disabled = false,
-  chips = DEFAULT_CHIPS,
-  onChipClick,
-  onMoreClick,
+  chips: _chips = DEFAULT_CHIPS,
+  onChipClick: _onChipClick,
+  onMoreClick: _onMoreClick,
   leadingHeader,
   trailingHeader,
   className,

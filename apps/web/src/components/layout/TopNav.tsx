@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Code2, Download } from "lucide-react";
+import { Code2, Download } from "lucide-react";
 import Link from "next/link";
 
 import { getProjectDownloadUrl } from "@/lib/api/projects";
@@ -12,23 +12,8 @@ export interface TopNavProps {
   onPublish?: () => void;
 }
 
-function Avatar({ className, initials = "JM" }: { className?: string; initials?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-orange-400 text-[10px] font-semibold text-black ring-1 ring-zinc-800",
-        className,
-      )}
-      aria-hidden
-    >
-      {initials}
-    </span>
-  );
-}
 
-export function TopNav({ projectId, projectName, onPublish }: TopNavProps) {
-  const display = projectName?.trim() || projectId;
-
+export function TopNav({ projectId, onPublish }: TopNavProps) {
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-zinc-800 bg-black px-3 text-sm text-zinc-50">
       <div className="flex items-center gap-2">
